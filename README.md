@@ -64,3 +64,9 @@ Player craft: **[ricks ufo](https://poly.pizza/m/q6vNUoHZXr)** by [eeee](https:/
 
 Goop hazard: GPU raymarched SDF metaballs (`js/goopMetaball.js`).
 Lava seams: large raymarched metaball banks (`js/goopMetaball.js`) — weave gaps, shoot to pinch.
+
+
+## Hazards (lava-only)
+- **Seams** — large drifting wall banks; weave the corridor
+- **Bubbles** — big burstable path blobs; shoot or crash
+Gold asteroids and jelly aliens removed for jam focus.
