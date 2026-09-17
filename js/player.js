@@ -27,6 +27,9 @@ export class Player {
     this.z = 0;
     this.forwardSpeed = 28;
     this._mouseFire = false;
+    /** @type {{x:number,y:number}} thumbstick weave while in XR */
+    this.xrAxis = { x: 0, y: 0 };
+    this.xrFire = false;
 
     this.mesh = new THREE.Group();
     scene.add(this.mesh);
@@ -116,11 +119,18 @@ export class Player {
   }
 
   wantsFire() {
-    return !!(this.keys['Space'] || this.keys['KeyZ'] || this._mouseFire);
+    return !!(this.keys['Space'] || this.keys['KeyZ'] || this._mouseFire || this.xrFire);
   }
 
   setMouseFire(v) {
     this._mouseFire = v;
+  }
+
+  /** Quest stick/trigger from main XR poll */
+  setXRInput(x, y, fire) {
+    this.xrAxis.x = x;
+    this.xrAxis.y = y;
+    this.xrFire = !!fire;
   }
 
   update(dt) {
@@ -133,10 +143,16 @@ export class Player {
     if (this.keys['KeyW'] || this.keys['ArrowUp']) dy += 1;
     if (this.keys['KeyS'] || this.keys['ArrowDown']) dy -= 1;
 
+    // XR thumbstick (Quest) — already analog, no normalize crush
+    dx += this.xrAxis.x;
+    dy += this.xrAxis.y;
+
     if (dx || dy) {
       const len = Math.hypot(dx, dy) || 1;
-      this.offset.x += (dx / len) * MOVE_SPEED * dt;
-      this.offset.y += (dy / len) * MOVE_SPEED * dt;
+      // Keep stick magnitude so soft tilt ≠ full WASD slam
+      const mag = Math.min(1, len);
+      this.offset.x += (dx / len) * mag * MOVE_SPEED * dt;
+      this.offset.y += (dy / len) * mag * MOVE_SPEED * dt;
     }
 
     const r = this.offset.length();
@@ -199,6 +215,9 @@ export class Player {
     this.fireTimer = 0;
     this.keys = Object.create(null);
     this._mouseFire = false;
+    /** @type {{x:number,y:number}} thumbstick weave while in XR */
+    this.xrAxis = { x: 0, y: 0 };
+    this.xrFire = false;
     for (const L of this.lasers) {
       this.scene.remove(L.mesh);
       L.mesh.geometry.dispose();

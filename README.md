@@ -70,3 +70,10 @@ Lava seams: large raymarched metaball banks (`js/goopMetaball.js`) — weave gap
 - **Seams** — large drifting wall banks; weave the corridor
 - **Bubbles** — big burstable path blobs; shoot or crash
 Gold asteroids and jelly aliens removed for jam focus.
+
+## VR (Meta Quest 3)
+
+1. Deploy / open the **HTTPS** GitHub Pages URL in the Quest **Browser** (WebXR needs a secure context).
+2. Tap **ENTER VR**.
+3. Stick = weave · Trigger = fire / start · Desktop WASD + Space still works outside VR.
+

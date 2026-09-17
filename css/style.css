@@ -48,3 +48,28 @@ canvas { display: block; width: 100%; height: 100%; }
 }
 
 .credit{font-size:0.75rem;opacity:0.65;margin-top:0.4rem;}
+
+
+/* Quest browser Enter VR — big hit target */
+#VRButton {
+  position: fixed !important;
+  bottom: 28px !important;
+  left: 50% !important;
+  transform: translateX(-50%);
+  width: auto !important;
+  min-width: 220px;
+  padding: 14px 28px !important;
+  border: 2px solid #C8FF00 !important;
+  border-radius: 14px !important;
+  background: rgba(255, 43, 214, 0.92) !important;
+  color: #fff !important;
+  font-size: 1.15rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 8px #00E5FF;
+  box-shadow: 0 0 24px #8B00FF, 0 0 8px #C8FF00;
+  cursor: pointer;
+  z-index: 40 !important;
+  opacity: 1 !important;
+}
+#VRButton:hover { filter: brightness(1.1); }
