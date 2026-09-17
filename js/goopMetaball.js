@@ -84,7 +84,7 @@ void main() {
     vec3 p = ro + rd * t;
     if (length(p - uBoundCenter) > uBoundRadius + 0.25) break;
     float d = mapScene(p);
-    if (d < 0.02) { hit = t; break; }
+    if (d < 0.018) { hit = t; break; }
     t += clamp(d, 0.012, 0.26);
     if (t > tEnter + uBoundRadius * 2.6) break;
   }
@@ -93,15 +93,43 @@ void main() {
 
   vec3 p = ro + rd * hit;
   vec3 n = calcNormal(p);
+  // Soften normals a touch so ellipsoids read jelly, not hard plastic
+  n = normalize(mix(n, -rd, 0.12));
   vec3 view = normalize(ro - p);
-  float fres = pow(1.0 - max(dot(n, view), 0.0), 2.2);
+  float ndv = max(dot(n, view), 0.0);
+  float fres = pow(1.0 - ndv, 1.65);
+  float fresSoft = pow(1.0 - ndv, 3.2);
 
-  float pulse = 0.5 + 0.5 * sin(uTime * 1.4 + p.x * 1.5 + p.y * 1.2 + p.z * 0.55);
-  vec3 guts = mix(uCore, uHot, pulse * 0.7);
-  vec3 col = mix(guts, uRim, fres * 0.85);
-  col += uHot * 0.2 * (1.0 - fres);
+  // Fake thickness: peek a bit inside along the view
+  float thick = 0.0;
+  vec3 pi = p - view * 0.35;
+  for (int j = 0; j < 4; j++) {
+    float di = mapScene(pi);
+    thick += exp(-max(di, 0.0) * 4.0);
+    pi -= view * 0.22;
+  }
+  thick = clamp(thick * 0.28, 0.0, 1.0);
 
-  float alpha = mix(0.82, 0.97, fres);
+  float pulse = 0.5 + 0.5 * sin(uTime * 1.35 + p.x * 1.4 + p.y * 1.15 + p.z * 0.5);
+  // Volumetric guts — translucent cyan body, lime hot spots
+  vec3 guts = mix(uCore * 0.75, uHot, pulse * 0.55 + thick * 0.35);
+  guts = mix(guts, uCore * 1.15, thick * 0.5);
+
+  // Magenta gel shell + slight chromatic rim split
+  vec3 rim = mix(uRim, uCore, fresSoft * 0.25);
+  rim = mix(rim, uHot, fres * 0.15);
+  vec3 col = mix(guts, rim, fres * 0.92);
+  // Wet specular speck
+  vec3 halfV = normalize(view + normalize(vec3(0.2, 0.7, 0.4)));
+  float spec = pow(max(dot(n, halfV), 0.0), 48.0);
+  col += vec3(1.0, 0.85, 1.0) * spec * 0.55;
+  // Subsurface glow when looking through the mass
+  col += uHot * (1.0 - fres) * thick * 0.35;
+  col += uRim * fresSoft * 0.2;
+
+  // Classic jelly: see-through center, denser rim
+  float alpha = mix(0.38, 0.92, fres * 0.75 + thick * 0.35);
+  alpha = clamp(alpha + fresSoft * 0.12, 0.32, 0.96);
   gl_FragColor = vec4(col, alpha);
 }
 `;
@@ -134,7 +162,7 @@ export function createGoopMetaball(mode = 'seam') {
       // Taper radii: thick mid lobe
       radii.push(0.55 + bulge * 0.55 + Math.random() * 0.08);
       // Flatten against wall, stretch along flight
-      axes.push(new THREE.Vector3(0.72, 0.85, 1.45 + bulge * 0.35));
+      axes.push(new THREE.Vector3(0.82, 0.9, 1.28 + bulge * 0.25));
     }
   } else {
     // Classic lava-lamp blob: chain along Z, fat bulb + thinner neck
@@ -158,9 +186,9 @@ export function createGoopMetaball(mode = 'seam') {
       // Teardrop stretch: skinny XY, long Z; fatter end gets rounder axes
       axes.push(
         new THREE.Vector3(
-          0.65 + fat * 0.25,
-          0.7 + fat * 0.22,
-          1.35 + (1 - fat) * 0.45
+          0.78 + fat * 0.18,
+          0.82 + fat * 0.16,
+          1.22 + (1 - fat) * 0.28
         )
       );
     }
@@ -196,9 +224,9 @@ export function createGoopMetaball(mode = 'seam') {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(boundR, 28, 20), mat);
   // Extra non-uniform stretch on the shell reinforces the lamp silhouette
   if (mode === 'seam') {
-    mesh.scale.set(1.05, 1.05, 1.55);
+    mesh.scale.set(1.05, 1.05, 1.4);
   } else {
-    mesh.scale.set(0.95, 1.05, 1.65);
+    mesh.scale.set(1.0, 1.08, 1.45);
   }
   uniforms.uBoundRadius.value = boundR;
 
@@ -241,7 +269,7 @@ export function createGoopMetaball(mode = 'seam') {
       }
       if (Math.abs(c.z) > maxZ) c.z = Math.sign(c.z) * maxZ;
 
-      radii[i] = baseRadii[i] + 0.06 * Math.sin(time * 0.9 + i + phase);
+      radii[i] = baseRadii[i] + 0.11 * Math.sin(time * 1.35 + i * 1.1 + phase);
 
       _tmp.copy(c);
       mesh.localToWorld(_tmp);

@@ -139,9 +139,9 @@ export class HazardManager {
 
     const goop = createGoopMetaball('blob');
     // Stretch into a lamp pill — avoid round marble look
-    const stretch = 1.15 + Math.random() * 0.25;
-    goop.mesh.scale.x *= 0.95 + Math.random() * 0.1;
-    goop.mesh.scale.y *= 1.05 + Math.random() * 0.15;
+    const stretch = 1.05 + Math.random() * 0.15;
+    goop.mesh.scale.x *= 1.0 + Math.random() * 0.06;
+    goop.mesh.scale.y *= 1.05 + Math.random() * 0.1;
     goop.mesh.scale.z *= stretch;
     group.add(goop.mesh);
 
