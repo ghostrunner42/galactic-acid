@@ -103,9 +103,9 @@ export class HazardManager {
     // ~40% gold / ~30% gel goop / ~30% alien
     const r = Math.random();
     const h =
-      r < 0.4
+      r < 0.35
         ? this._makeGoldAsteroid(z)
-        : r < 0.7
+        : r < 0.75
           ? this._makeGelGoop(z)
           : this._makeJellyAlien(z);
     this.hazards.push(h);
@@ -185,14 +185,14 @@ export class HazardManager {
     return {
       mesh: group,
       shootable: true,
-      hitRadius: 1.35,
+      hitRadius: 1.6,
       kind: 'goop',
       _goop: goop,
       update(dt, time) {
         goop.update(dt, time);
       },
       collides(pPos, pR) {
-        return group.position.distanceTo(pPos) < 1.35 + pR;
+        return group.position.distanceTo(pPos) < 1.6 + pR;
       },
     };
   }

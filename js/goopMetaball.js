@@ -2,28 +2,32 @@ import * as THREE from 'three';
 
 const BALL_COUNT = 8;
 
+/**
+ * World-space raymarch through a bounding sphere.
+ * More reliable than object-space inverse tricks on nested Groups.
+ */
 const VERT = /* glsl */ `
-uniform mat4 uInverseModel;
-varying vec3 vLocalPos;
-varying vec3 vRayOrigin;
+varying vec3 vWorldPos;
 void main() {
-  vLocalPos = position;
-  vec4 camObj = uInverseModel * vec4(cameraPosition, 1.0);
-  vRayOrigin = camObj.xyz;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
 
 const FRAG = /* glsl */ `
 precision highp float;
+
 uniform float uTime;
-uniform vec3 uCenters[8];
+uniform vec3 uCenters[8]; // world-space centers
 uniform float uRadii[8];
 uniform vec3 uRim;
 uniform vec3 uCore;
 uniform vec3 uHot;
-varying vec3 vLocalPos;
-varying vec3 vRayOrigin;
+uniform vec3 uBoundCenter; // group world position
+uniform float uBoundRadius;
+
+varying vec3 vWorldPos;
 
 float smin(float a, float b, float k) {
   float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -34,143 +38,175 @@ float mapScene(vec3 p) {
   float d = 1e5;
   for (int i = 0; i < 8; i++) {
     float bi = length(p - uCenters[i]) - uRadii[i];
-    d = smin(d, bi, 0.45);
+    d = smin(d, bi, 0.55);
   }
   return d;
 }
 
 vec3 calcNormal(vec3 p) {
-  const float e = 0.012;
+  const float e = 0.02;
   return normalize(vec3(
-    mapScene(p + vec3(e,0,0)) - mapScene(p - vec3(e,0,0)),
-    mapScene(p + vec3(0,e,0)) - mapScene(p - vec3(0,e,0)),
-    mapScene(p + vec3(0,0,e)) - mapScene(p - vec3(0,0,e))
+    mapScene(p + vec3(e, 0.0, 0.0)) - mapScene(p - vec3(e, 0.0, 0.0)),
+    mapScene(p + vec3(0.0, e, 0.0)) - mapScene(p - vec3(0.0, e, 0.0)),
+    mapScene(p + vec3(0.0, 0.0, e)) - mapScene(p - vec3(0.0, 0.0, e))
   ));
 }
 
-void main() {
-  vec3 ro = vRayOrigin;
-  vec3 rd = normalize(vLocalPos - ro);
+// Enter ray into bounding sphere; returns tEnter (or -1)
+float sphereEnter(vec3 ro, vec3 rd, vec3 c, float r) {
+  vec3 oc = ro - c;
+  float b = dot(oc, rd);
+  float disc = b * b - dot(oc, oc) + r * r;
+  if (disc < 0.0) return -1.0;
+  float s = sqrt(disc);
+  float t0 = -b - s;
+  float t1 = -b + s;
+  if (t1 < 0.0) return -1.0;
+  return max(t0, 0.0);
+}
 
-  // Raymarch inside bounding volume
-  float t = 0.0;
+void main() {
+  vec3 ro = cameraPosition;
+  vec3 rd = normalize(vWorldPos - cameraPosition);
+
+  float t = sphereEnter(ro, rd, uBoundCenter, uBoundRadius);
+  if (t < 0.0) discard;
+
   float hit = -1.0;
-  for (int i = 0; i < 48; i++) {
+  for (int i = 0; i < 64; i++) {
     vec3 p = ro + rd * t;
+    if (length(p - uBoundCenter) > uBoundRadius + 0.15) break;
     float d = mapScene(p);
-    if (d < 0.008) { hit = t; break; }
-    t += max(d, 0.02);
-    if (t > 6.0) break;
+    if (d < 0.015) { hit = t; break; }
+    t += clamp(d, 0.02, 0.35);
+    if (t > 80.0) break;
   }
 
-  if (hit < 0.0) discard;
+  if (hit < 0.0) {
+    // Soft fallback shell so we never go fully invisible if march misses
+    float fres = pow(1.0 - abs(dot(normalize(vWorldPos - uBoundCenter), -rd)), 3.0);
+    if (fres < 0.35) discard;
+    gl_FragColor = vec4(uRim, fres * 0.35);
+    return;
+  }
 
   vec3 p = ro + rd * hit;
   vec3 n = calcNormal(p);
   vec3 view = normalize(ro - p);
-  float fres = pow(1.0 - max(dot(n, view), 0.0), 2.6);
+  float fres = pow(1.0 - max(dot(n, view), 0.0), 2.4);
 
-  float depth = clamp(hit / 3.5, 0.0, 1.0);
-  float pulse = 0.5 + 0.5 * sin(uTime * 1.8 + p.x * 3.0 + p.y * 2.0);
-  vec3 guts = mix(uCore, uHot, pulse * 0.7 + depth * 0.25);
+  float depth = clamp(hit * 0.08, 0.0, 1.0);
+  float pulse = 0.5 + 0.5 * sin(uTime * 1.8 + p.x * 2.5 + p.y * 2.0);
+  vec3 guts = mix(uCore, uHot, pulse * 0.65 + depth * 0.2);
   vec3 col = mix(guts, uRim, fres);
+  col += uHot * exp(-depth * 2.0) * 0.3;
 
-  // Subtle internal glow
-  float glow = exp(-depth * 2.2) * 0.35;
-  col += uHot * glow;
-
-  float alpha = mix(0.72, 0.98, fres);
+  float alpha = mix(0.78, 0.98, fres);
   gl_FragColor = vec4(col, alpha);
 }
 `;
 
-/**
- * Raymarched SDF metaball goop — jam signature hazard look.
- * Bounding sphere mesh; 8 spring-driven centers on CPU.
- */
 export function createGoopMetaball() {
-  const centers = [];
-  const rest = [];
+  const localRest = [];
+  const localPos = [];
   const vel = [];
   const radii = [];
 
   for (let i = 0; i < BALL_COUNT; i++) {
     const a = (i / BALL_COUNT) * Math.PI * 2;
-    const r = 0.35 + Math.random() * 0.45;
+    const r = 0.25 + (i % 3) * 0.12;
     const p = new THREE.Vector3(
-      Math.cos(a) * r * (0.4 + Math.random() * 0.5),
-      Math.sin(a * 1.3) * r * 0.55,
-      Math.sin(a) * r * 0.35
+      Math.cos(a) * r,
+      Math.sin(a * 1.2) * r * 0.85,
+      Math.sin(a) * r * 0.55
     );
-    rest.push(p.clone());
-    centers.push(p);
+    localRest.push(p.clone());
+    localPos.push(p.clone());
     vel.push(new THREE.Vector3());
-    radii.push(0.28 + Math.random() * 0.22);
+    radii.push(0.55 + (i % 4) * 0.08); // chunkier so they visibly merge
   }
+
+  const worldCenters = localPos.map(() => new THREE.Vector3());
 
   const uniforms = {
     uTime: { value: 0 },
-    uCenters: { value: centers },
+    uCenters: { value: worldCenters },
     uRadii: { value: radii },
     uRim: { value: new THREE.Color(0xff2bd6) },
     uCore: { value: new THREE.Color(0x00e5ff) },
     uHot: { value: new THREE.Color(0xc8ff00) },
-    uInverseModel: { value: new THREE.Matrix4() },
+    uBoundCenter: { value: new THREE.Vector3() },
+    uBoundRadius: { value: 2.4 },
   };
 
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    side: THREE.BackSide, // ray enters from inside the bound
+    side: THREE.FrontSide,
     uniforms,
     vertexShader: VERT,
     fragmentShader: FRAG,
   });
 
-  // Bounding sphere large enough for wobbling centers
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(2.2, 24, 16), mat);
-  // Also render front faces for silhouette when camera outside — use double side ray
-  mat.side = THREE.DoubleSide;
+  const boundR = 2.4;
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(boundR, 32, 24), mat);
+  // Slightly scale up the whole blob for tunnel readability
+  mesh.scale.setScalar(1.15);
 
   const phase = Math.random() * Math.PI * 2;
+  const _world = new THREE.Vector3();
 
   function update(dt, time) {
     uniforms.uTime.value = time;
     mesh.updateWorldMatrix(true, false);
-    uniforms.uInverseModel.value.copy(mesh.matrixWorld).invert();
+
     for (let i = 0; i < BALL_COUNT; i++) {
-      const target = rest[i].clone();
-      // Slow breathe / orbit
-      const w = time * (0.7 + i * 0.05) + phase;
-      target.x += Math.sin(w) * 0.22;
-      target.y += Math.cos(w * 1.15) * 0.2;
-      target.z += Math.sin(w * 0.8 + i) * 0.18;
-      // Soft spring
-      const c = centers[i];
+      const target = localRest[i].clone();
+      const w = time * (0.85 + i * 0.04) + phase;
+      target.x += Math.sin(w) * 0.35;
+      target.y += Math.cos(w * 1.1) * 0.32;
+      target.z += Math.sin(w * 0.9 + i) * 0.28;
+
+      const c = localPos[i];
       const v = vel[i];
-      const force = target.clone().sub(c).multiplyScalar(8);
-      v.addScaledVector(force, dt);
-      v.multiplyScalar(0.92);
+      v.addScaledVector(target.sub(c).multiplyScalar(10), dt);
+      v.multiplyScalar(0.9);
       c.addScaledVector(v, dt);
-      // Keep inside bound
-      if (c.length() > 1.5) c.setLength(1.5);
-      radii[i] = 0.3 + 0.08 * Math.sin(time * 2 + i + phase);
+      if (c.length() > 1.35) c.setLength(1.35);
+
+      radii[i] = 0.5 + 0.12 * Math.sin(time * 2.1 + i + phase);
+
+      // local → world
+      _world.copy(c);
+      mesh.localToWorld(_world);
+      worldCenters[i].copy(_world);
     }
+
+    mesh.getWorldPosition(uniforms.uBoundCenter.value);
+    // bound radius in world units (uniform scale)
+    uniforms.uBoundRadius.value = boundR * mesh.scale.x;
     uniforms.uRadii.value = radii;
-    uniforms.uCenters.value = centers;
+    uniforms.uCenters.value = worldCenters;
   }
 
-  /** Brief pinch: yank centers apart then let springs recover (shot juice). */
   function pinch() {
     for (let i = 0; i < BALL_COUNT; i++) {
-      const dir = centers[i].clone().normalize();
-      if (dir.lengthSq() < 0.01) dir.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
-      vel[i].addScaledVector(dir, 4 + Math.random() * 3);
+      const dir = localPos[i].clone();
+      if (dir.lengthSq() < 1e-4) {
+        dir.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+      }
+      dir.normalize();
+      vel[i].addScaledVector(dir, 5 + Math.random() * 4);
     }
   }
 
-  return { mesh, update, pinch, dispose() {
-    mesh.geometry.dispose();
-    mat.dispose();
-  }};
+  return {
+    mesh,
+    update,
+    pinch,
+    dispose() {
+      mesh.geometry.dispose();
+      mat.dispose();
+    },
+  };
 }
