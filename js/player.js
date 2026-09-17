@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TUBE_RADIUS } from './tunnel.js';
 
 const MOVE_SPEED = 14;
@@ -9,15 +8,13 @@ const FIRE_COOLDOWN = 0.18;
 const LASER_SPEED = 90;
 const LASER_LIFE = 1.4;
 
-/** Locked accents for lasers / fallback placeholder */
-const MAGENTA = 0xff2bd6;
 const CYAN = 0x00e5ff;
 const LIME = 0xc8ff00;
 const VIOLET = 0x8b00ff;
 
 /**
- * Player craft — Quaternius Spitfire (CC0) from Ultimate Spaceships pack.
- * Poly Pizza twin was CF-walled; same author/license.
+ * Player craft — Quaternius Spaceship (CC0) from Poly Pizza
+ * https://poly.pizza/m/u105mYHLHU
  */
 export class Player {
   constructor(scene) {
@@ -34,7 +31,7 @@ export class Player {
     this.mesh = new THREE.Group();
     scene.add(this.mesh);
     this._mountPlaceholder();
-    this._loadQuaterniusShip();
+    this._loadShip();
 
     this._onKeyDown = (e) => {
       this.keys[e.code] = true;
@@ -53,80 +50,69 @@ export class Player {
       new THREE.MeshBasicMaterial({ color: CYAN })
     );
     body.rotation.x = Math.PI / 2;
-    body.name = 'placeholder';
     this.mesh.add(body);
   }
 
-  _loadQuaterniusShip() {
-    const mtlLoader = new MTLLoader();
-    mtlLoader.setPath('assets/ship/');
-    mtlLoader.load(
-      'Spitfire.mtl',
-      (materials) => {
-        materials.preload();
-        const objLoader = new OBJLoader();
-        objLoader.setMaterials(materials);
-        objLoader.setPath('assets/ship/');
-        objLoader.load(
-          'Spitfire.obj',
-          (obj) => {
-            // Unlit convert — scene has no lights
-            obj.traverse((c) => {
-              if (c.isMesh) {
-                const map = c.material?.map || null;
-                c.material = new THREE.MeshBasicMaterial({
-                  map,
-                  color: map ? 0xffffff : CYAN,
-                });
-                c.castShadow = false;
-              }
+  _loadShip() {
+    const loader = new GLTFLoader();
+    loader.load(
+      'assets/ship/spaceship.glb',
+      (gltf) => {
+        const obj = gltf.scene;
+        obj.traverse((c) => {
+          if (c.isMesh) {
+            const map = c.material?.map || null;
+            const color = c.material?.color
+              ? c.material.color.getHex()
+              : 0xffffff;
+            c.material = new THREE.MeshBasicMaterial({
+              map,
+              color: map ? 0xffffff : color,
             });
+          }
+        });
 
-            // Fit + aim nose down the tunnel (-Z)
-            const box = new THREE.Box3().setFromObject(obj);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            const maxDim = Math.max(size.x, size.y, size.z) || 1;
-            const target = 1.8; // ship length in world units
-            obj.scale.setScalar(target / maxDim);
+        const box = new THREE.Box3().setFromObject(obj);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z) || 1;
+        obj.scale.setScalar(1.9 / maxDim);
 
-            // Quaternius ships often face +Y or +Z — rotate to fly toward -Z
-            obj.rotation.x = Math.PI / 2;
+        // Aim nose down the tunnel (-Z)
+        obj.rotation.y = Math.PI;
+        // Many Quaternius ships are Y-up; tip forward
+        obj.rotation.x = Math.PI / 2;
 
-            // Recenter after scale/rot
-            const box2 = new THREE.Box3().setFromObject(obj);
-            const center = new THREE.Vector3();
-            box2.getCenter(center);
-            obj.position.sub(center);
+        const box2 = new THREE.Box3().setFromObject(obj);
+        const center = new THREE.Vector3();
+        box2.getCenter(center);
+        obj.position.sub(center);
 
-            // Clear placeholder
-            while (this.mesh.children.length) {
-              const ch = this.mesh.children[0];
-              this.mesh.remove(ch);
-              ch.geometry?.dispose?.();
-              ch.material?.dispose?.();
-            }
-            this.mesh.add(obj);
+        while (this.mesh.children.length) {
+          const ch = this.mesh.children[0];
+          this.mesh.remove(ch);
+          ch.geometry?.dispose?.();
+          if (ch.material) {
+            if (Array.isArray(ch.material)) ch.material.forEach((m) => m.dispose());
+            else ch.material.dispose?.();
+          }
+        }
+        this.mesh.add(obj);
 
-            // Engine glow at rear (+Z local after rot)
-            const glow = new THREE.Mesh(
-              new THREE.SphereGeometry(0.22, 8, 8),
-              new THREE.MeshBasicMaterial({
-                color: VIOLET,
-                transparent: true,
-                opacity: 0.85,
-              })
-            );
-            glow.position.set(0, 0, 0.75);
-            this.mesh.add(glow);
-            this.engineGlow = glow;
-          },
-          undefined,
-          (err) => console.warn('Ship OBJ load failed', err)
+        const glow = new THREE.Mesh(
+          new THREE.SphereGeometry(0.2, 8, 8),
+          new THREE.MeshBasicMaterial({
+            color: VIOLET,
+            transparent: true,
+            opacity: 0.85,
+          })
         );
+        glow.position.set(0, 0, 0.85);
+        this.mesh.add(glow);
+        this.engineGlow = glow;
       },
       undefined,
-      (err) => console.warn('Ship MTL load failed', err)
+      (err) => console.warn('Ship GLB load failed', err)
     );
   }
 
@@ -204,7 +190,7 @@ export class Player {
   }
 
   getHitRadius() {
-    return 0.65;
+    return 0.7;
   }
 
   reset() {
