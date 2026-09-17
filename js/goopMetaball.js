@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const BALL_COUNT = 10;
+const BALL_COUNT = 6;
 
 /**
  * Large navigable lava-seam metaball.
@@ -20,8 +20,8 @@ const FRAG = /* glsl */ `
 precision highp float;
 
 uniform float uTime;
-uniform vec3 uCenters[10];
-uniform float uRadii[10];
+uniform vec3 uCenters[6];
+uniform float uRadii[6];
 uniform vec3 uRim;
 uniform vec3 uCore;
 uniform vec3 uHot;
@@ -37,9 +37,9 @@ float smin(float a, float b, float k) {
 
 float mapScene(vec3 p) {
   float d = 1e5;
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 6; i++) {
     float bi = length(p - uCenters[i]) - uRadii[i];
-    d = smin(d, bi, 0.75);
+    d = smin(d, bi, 1.15);
   }
   return d;
 }
@@ -113,13 +113,13 @@ export function createGoopMetaball(mode = 'seam') {
   const radii = [];
 
   if (mode === 'seam') {
-    // Arc of lava along one side of the tube — leave a flyable gap opposite
+    // Tight arc — centers stay close so smin reads as ONE molten bank
     const side = Math.random() * Math.PI * 2;
     for (let i = 0; i < BALL_COUNT; i++) {
-      const along = (i / (BALL_COUNT - 1) - 0.5) * 2.8; // stretch in local Z
-      const spread = (i % 3 - 1) * 0.55;
-      const a = side + spread * 0.7;
-      const r = 0.9 + (i % 2) * 0.35;
+      const along = (i / (BALL_COUNT - 1) - 0.5) * 1.6;
+      const spread = (i % 3 - 1) * 0.28;
+      const a = side + spread * 0.45;
+      const r = 0.55 + (i % 2) * 0.15;
       const p = new THREE.Vector3(
         Math.cos(a) * r,
         Math.sin(a) * r,
@@ -128,21 +128,22 @@ export function createGoopMetaball(mode = 'seam') {
       localRest.push(p.clone());
       localPos.push(p.clone());
       vel.push(new THREE.Vector3());
-      radii.push(0.85 + Math.random() * 0.45);
+      radii.push(1.15 + Math.random() * 0.35);
     }
   } else {
+    // Bubble: packed cluster → single lava-lamp blob
     for (let i = 0; i < BALL_COUNT; i++) {
       const a = (i / BALL_COUNT) * Math.PI * 2;
-      const r = 0.4 + (i % 3) * 0.2;
+      const r = 0.15 + (i % 3) * 0.08;
       const p = new THREE.Vector3(
         Math.cos(a) * r,
-        Math.sin(a * 1.1) * r * 0.9,
-        Math.sin(a) * r * 0.5
+        Math.sin(a * 1.1) * r * 0.85,
+        Math.sin(a) * r * 0.4
       );
       localRest.push(p.clone());
       localPos.push(p.clone());
       vel.push(new THREE.Vector3());
-      radii.push(0.7 + (i % 4) * 0.12);
+      radii.push(1.05 + (i % 3) * 0.12);
     }
   }
 
@@ -185,9 +186,9 @@ export function createGoopMetaball(mode = 'seam') {
       const target = localRest[i].clone();
       const w = time * (0.55 + i * 0.03) + phase;
       // Lava-lamp bob — slow, thick
-      target.x += Math.sin(w) * 0.28;
-      target.y += Math.cos(w * 0.9) * 0.28;
-      target.z += Math.sin(w * 0.7 + i) * 0.22;
+      target.x += Math.sin(w) * 0.12;
+      target.y += Math.cos(w * 0.9) * 0.12;
+      target.z += Math.sin(w * 0.7 + i) * 0.1;
 
       const c = localPos[i];
       const v = vel[i];
@@ -195,12 +196,12 @@ export function createGoopMetaball(mode = 'seam') {
       v.multiplyScalar(0.93);
       c.addScaledVector(v, dt);
 
-      const maxR = mode === 'seam' ? 2.6 : 1.8;
+      const maxR = mode === 'seam' ? 1.4 : 0.85;
       if (c.length() > maxR) c.setLength(maxR);
 
       radii[i] =
-        (mode === 'seam' ? 0.9 : 0.65) +
-        0.2 * Math.sin(time * 1.4 + i + phase);
+        (mode === 'seam' ? 1.15 : 1.05) +
+        0.1 * Math.sin(time * 1.1 + i + phase);
 
       _tmp.copy(c);
       mesh.localToWorld(_tmp);

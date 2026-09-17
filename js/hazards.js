@@ -10,8 +10,8 @@ import { createGoopMetaball } from './goopMetaball.js';
  */
 
 const SPAWN_AHEAD = 70;
-const SPAWN_INTERVAL_START = 0.42;
-const SPAWN_INTERVAL_MIN = 0.18;
+const SPAWN_INTERVAL_START = 0.7;
+const SPAWN_INTERVAL_MIN = 0.38;
 
 const MAGENTA = 0xff2bd6;
 const CYAN = 0x00e5ff;
@@ -91,9 +91,9 @@ export class HazardManager {
 
   /** Busy: 2–4 lava pieces per tick */
   _spawnBurst(playerZ) {
-    const n = 2 + Math.floor(Math.random() * 3);
+    const n = 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < n; i++) {
-      const z = playerZ - SPAWN_AHEAD - Math.random() * 50 - i * 8;
+      const z = playerZ - SPAWN_AHEAD - Math.random() * 40 - i * 14;
       // More bubbles in the lane, seams on the banks
       const h = Math.random() < 0.55 ? this._makeBubble(z) : this._makeSeam(z);
       this.hazards.push(h);
@@ -104,7 +104,7 @@ export class HazardManager {
   _makeSeam(z) {
     const group = new THREE.Group();
     const ang = Math.random() * Math.PI * 2;
-    const rad = TUBE_RADIUS * 0.4 + Math.random() * TUBE_RADIUS * 0.25;
+    const rad = TUBE_RADIUS * 0.55 + Math.random() * TUBE_RADIUS * 0.2;
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
     const goop = createGoopMetaball('seam');
@@ -113,19 +113,19 @@ export class HazardManager {
     return {
       mesh: group,
       shootable: true,
-      hitRadius: 3.4,
+      hitRadius: 2.2,
       kind: 'seam',
       _goop: goop,
       drift: {
         angle: ang,
         radius: rad,
-        speed: (Math.random() < 0.5 ? -1 : 1) * (0.15 + Math.random() * 0.25),
+        speed: (Math.random() < 0.5 ? -1 : 1) * (0.08 + Math.random() * 0.12),
       },
       update(dt, time) {
         goop.update(dt, time);
       },
       collides(pPos, pR) {
-        return group.position.distanceTo(pPos) < 3.4 + pR;
+        return group.position.distanceTo(pPos) < 2.2 + pR;
       },
     };
   }
@@ -134,7 +134,7 @@ export class HazardManager {
     const group = new THREE.Group();
     // Prefer flight corridor — big blobs you must burst or dodge
     const ang = Math.random() * Math.PI * 2;
-    const rad = Math.random() * (TUBE_RADIUS * 0.45);
+    const rad = TUBE_RADIUS * 0.15 + Math.random() * (TUBE_RADIUS * 0.35);
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
     const goop = createGoopMetaball('blob');
@@ -145,7 +145,7 @@ export class HazardManager {
     return {
       mesh: group,
       shootable: true,
-      hitRadius: 2.6,
+      hitRadius: 1.7,
       kind: 'bubble',
       _goop: goop,
       update(dt, time) {
@@ -155,7 +155,7 @@ export class HazardManager {
         group.position.y += Math.cos(time * 0.6 + z) * dt * 0.4;
       },
       collides(pPos, pR) {
-        return group.position.distanceTo(pPos) < 2.6 + pR;
+        return group.position.distanceTo(pPos) < 1.7 + pR;
       },
     };
   }
