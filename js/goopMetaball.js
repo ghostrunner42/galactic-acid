@@ -3,9 +3,8 @@ import * as THREE from 'three';
 const BALL_COUNT = 6;
 
 /**
- * Lava-lamp metaball: classic reciprocal field (Three.js MarchingCubes.addBall /
- * webglsamples blob) raymarched on GPU — no CPU mesh rebuild.
- * Field: sum( strength/(ε+r²) - subtract ); SDF ≈ (isol - field) / |∇field|.
+ * Lava-lamp metaball: reciprocal field (MarchingCubes.addBall) + rim-matched
+ * contour banding (magenta → blue → cyan → lime) and irregular cell lobes.
  */
 const VERT = /* glsl */ `
 varying vec3 vWorldPos;
@@ -26,15 +25,11 @@ uniform vec3 uAxes[6];
 uniform float uStrength[6];
 uniform float uSubtract;
 uniform float uIsol;
-uniform vec3 uRim;
-uniform vec3 uCore;
-uniform vec3 uHot;
 uniform vec3 uBoundCenter;
 uniform float uBoundRadius;
 
 varying vec3 vWorldPos;
 
-// One ball contrib — matches MarchingCubes.addBall reciprocal
 float ballVal(vec3 p, vec3 c, float strength, vec3 ax) {
   vec3 q = (p - c) / ax;
   float r2 = dot(q, q);
@@ -45,13 +40,11 @@ float fieldScene(vec3 p) {
   float f = 0.0;
   for (int i = 0; i < 6; i++) {
     float v = ballVal(p, uCenters[i], uStrength[i], uAxes[i]);
-    // addBall only accumulates when val > 0 (fade-out radius)
     if (v > 0.0) f += v;
   }
   return f;
 }
 
-// Analytic ∇ of strength/(ε+|q|²) with q=(p-c)/ax, then chain-rule / ax
 vec3 fieldGrad(vec3 p) {
   vec3 g = vec3(0.0);
   for (int i = 0; i < 6; i++) {
@@ -61,7 +54,6 @@ vec3 fieldGrad(vec3 p) {
     float denom = 0.000001 + r2;
     float v = uStrength[i] / denom - uSubtract;
     if (v > 0.0) {
-      // d/dq (s/denom) = -2 s q / denom² ; dq/dp = 1/ax
       vec3 dq = (-2.0 * uStrength[i] * q) / (denom * denom);
       g += dq / ax;
     }
@@ -69,18 +61,34 @@ vec3 fieldGrad(vec3 p) {
   return g;
 }
 
-// Approximate SDF so sphere-tracing still works
+// Organic surface wrinkle — breaks smooth oval into cell-like lobes
+float wrinkle(vec3 p) {
+  float t = uTime * 0.55;
+  return 0.055 * sin(p.x * 3.1 + t)
+       * sin(p.y * 2.7 - t * 0.8)
+       * sin(p.z * 2.4 + t * 0.6)
+       + 0.035 * sin(p.x * 5.2 - p.y * 4.1 + t * 1.3);
+}
+
 float mapScene(vec3 p) {
   float f = fieldScene(p);
   float g = length(fieldGrad(p));
-  return (uIsol - f) / max(g, 0.08);
+  return (uIsol - f) / max(g, 0.08) + wrinkle(p);
 }
 
 vec3 calcNormal(vec3 p) {
-  // Field rises toward centers → ∇field points inward; flip for outward N
   vec3 g = fieldGrad(p);
   float gl = length(g);
-  if (gl > 1e-5) return normalize(-g);
+  if (gl > 1e-5) {
+    // Wrinkle gradient via central differences (cheap)
+    const float e = 0.04;
+    vec3 wn = vec3(
+      wrinkle(p + vec3(e, 0.0, 0.0)) - wrinkle(p - vec3(e, 0.0, 0.0)),
+      wrinkle(p + vec3(0.0, e, 0.0)) - wrinkle(p - vec3(0.0, e, 0.0)),
+      wrinkle(p + vec3(0.0, 0.0, e)) - wrinkle(p - vec3(0.0, 0.0, e))
+    );
+    return normalize(-g + wn * 12.0);
+  }
   const float e = 0.03;
   return normalize(vec3(
     mapScene(p + vec3(e, 0.0, 0.0)) - mapScene(p - vec3(e, 0.0, 0.0)),
@@ -101,6 +109,36 @@ float sphereEnter(vec3 ro, vec3 rd, vec3 c, float r) {
   return max(t0, 0.0);
 }
 
+// Cheap stipple like the rim texture grain
+float hash21(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// Rim palette: magenta → electric blue → cyan → lime (stepped contours)
+vec3 rimContour(float t, float grain) {
+  // t: 0 = core, 1 = outer rim
+  vec3 magenta = vec3(1.00, 0.17, 0.84);
+  vec3 blue    = vec3(0.28, 0.32, 1.00);
+  vec3 cyan    = vec3(0.00, 0.90, 1.00);
+  vec3 lime    = vec3(0.78, 1.00, 0.05);
+
+  // Hard-ish bands with slight grain jitter (topographic / stippled)
+  float tg = clamp(t + (grain - 0.5) * 0.06, 0.0, 1.0);
+  vec3 col;
+  if (tg > 0.70) {
+    col = mix(blue, magenta, smoothstep(0.70, 0.92, tg));
+  } else if (tg > 0.42) {
+    col = mix(cyan, blue, smoothstep(0.42, 0.70, tg));
+  } else if (tg > 0.18) {
+    col = mix(lime, cyan, smoothstep(0.18, 0.42, tg));
+  } else {
+    col = mix(lime * 1.15, lime, tg / 0.18);
+  }
+  // Stipple darken/brighten like rim dither
+  col *= 0.88 + 0.24 * grain;
+  return col;
+}
+
 void main() {
   vec3 ro = cameraPosition;
   vec3 rd = normalize(vWorldPos - cameraPosition);
@@ -115,7 +153,6 @@ void main() {
     if (length(p - uBoundCenter) > uBoundRadius + 0.35) break;
     float d = mapScene(p);
     if (d < 0.02) { hit = t; break; }
-    // Conservative step — |grad| SDF can undershoot lipschitz near merges
     t += clamp(d * 0.8, 0.01, 0.22);
     if (t > tEnter + uBoundRadius * 2.8) break;
   }
@@ -124,51 +161,44 @@ void main() {
 
   vec3 p = ro + rd * hit;
   vec3 n = calcNormal(p);
-  // Soften so wax reads jelly, not hard plastic
-  n = normalize(mix(n, -rd, 0.12));
+  n = normalize(mix(n, -rd, 0.08));
   vec3 view = normalize(ro - p);
   float ndv = max(dot(n, view), 0.0);
-  float fres = pow(1.0 - ndv, 1.65);
-  float fresSoft = pow(1.0 - ndv, 3.2);
+  float fres = pow(1.0 - ndv, 1.55);
 
-  // Fake thickness: peek inside along the view
+  // Thickness / density toward core
   float thick = 0.0;
-  vec3 pi = p - view * 0.35;
-  for (int j = 0; j < 4; j++) {
+  vec3 pi = p - view * 0.28;
+  for (int j = 0; j < 5; j++) {
     float di = mapScene(pi);
-    thick += exp(-max(di, 0.0) * 4.0);
-    pi -= view * 0.22;
+    thick += exp(-max(di, 0.0) * 3.6);
+    pi -= view * 0.18;
   }
-  thick = clamp(thick * 0.28, 0.0, 1.0);
+  thick = clamp(thick * 0.22, 0.0, 1.0);
 
-  float pulse = 0.5 + 0.5 * sin(uTime * 1.35 + p.x * 1.4 + p.y * 1.15 + p.z * 0.5);
-  // Volumetric guts — translucent cyan body, lime hot spots
-  vec3 guts = mix(uCore * 0.75, uHot, pulse * 0.55 + thick * 0.35);
-  guts = mix(guts, uCore * 1.15, thick * 0.5);
+  // Field depth above isol — denser = deeper into wax
+  float fHit = fieldScene(p);
+  float depth = clamp((fHit - uIsol) / 10.0, 0.0, 1.0);
 
-  // Magenta gel shell + slight chromatic rim split
-  vec3 rim = mix(uRim, uCore, fresSoft * 0.25);
-  rim = mix(rim, uHot, fres * 0.15);
-  vec3 col = mix(guts, rim, fres * 0.92);
-  // Wet specular speck
-  vec3 halfV = normalize(view + normalize(vec3(0.2, 0.7, 0.4)));
-  float spec = pow(max(dot(n, halfV), 0.0), 48.0);
-  col += vec3(1.0, 0.85, 1.0) * spec * 0.55;
-  // Subsurface glow when looking through the mass
-  col += uHot * (1.0 - fres) * thick * 0.35;
-  col += uRim * fresSoft * 0.2;
+  // Contour coordinate: edge magenta → core lime (matches tunnel cells)
+  float band = clamp(fres * 0.78 + (1.0 - thick) * 0.45 - depth * 0.25, 0.0, 1.0);
+  float grain = hash21(gl_FragCoord.xy * 0.7 + floor(uTime * 8.0));
+  vec3 col = rimContour(band, grain);
 
-  // Classic jelly: see-through center, denser rim
-  float alpha = mix(0.38, 0.92, fres * 0.75 + thick * 0.35);
-  alpha = clamp(alpha + fresSoft * 0.12, 0.32, 0.96);
+  // Mild wet highlight (keep gel, not chrome)
+  vec3 halfV = normalize(view + normalize(vec3(0.15, 0.75, 0.35)));
+  float spec = pow(max(dot(n, halfV), 0.0), 36.0);
+  col += vec3(1.0, 0.9, 1.0) * spec * 0.35;
+
+  // More opaque than soft jelly — closer to solid rim wax cells
+  float alpha = mix(0.72, 0.97, fres * 0.55 + (1.0 - thick) * 0.25);
+  alpha = clamp(alpha, 0.65, 0.98);
   gl_FragColor = vec4(col, alpha);
 }
 `;
 
 /**
  * @param {'blob'|'seam'} mode
- *  blob = elongated floating lamp mass (teardrop / pill)
- *  seam = wall-hugging lava ribbon you weave past
  */
 export function createGoopMetaball(mode = 'seam') {
   const localRest = [];
@@ -178,54 +208,59 @@ export function createGoopMetaball(mode = 'seam') {
   const axes = [];
   const strengths = [];
 
-  // Reciprocal field params — world-space cousin of demo subtract/isol
-  // Isol surface size ≈ radius when strength ≈ (isol+subtract)*r²
-  const SUBTRACT = 2.4;
-  const ISOL = 1.0;
+  const SUBTRACT = 2.2;
+  const ISOL = 1.05;
 
   if (mode === 'seam') {
-    // Long wall ribbon — span Z hard so it never reads as a marble
+    // Irregular wall cell ribbon — lumpy, not a smooth sausage
     const side = Math.random() * Math.PI * 2;
     for (let i = 0; i < BALL_COUNT; i++) {
       const t = i / (BALL_COUNT - 1);
-      const along = (t - 0.5) * 3.4;
-      const bulge = Math.sin(t * Math.PI); // fat mid, thin ends
-      const a = side + (t - 0.5) * 0.35 + (i % 2) * 0.08;
-      const r = 0.62 + bulge * 0.12;
-      const p = new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, along);
-      localRest.push(p.clone());
-      localPos.push(p.clone());
-      vel.push(new THREE.Vector3());
-      // Taper radii: thick mid lobe
-      radii.push(0.55 + bulge * 0.55 + Math.random() * 0.08);
-      // Flatten against wall, stretch along flight
-      axes.push(new THREE.Vector3(0.82, 0.9, 1.28 + bulge * 0.25));
-    }
-  } else {
-    // Classic lava-lamp blob: chain along Z, fat bulb + thinner neck
-    const yaw = Math.random() * Math.PI * 2;
-    const tipHeavy = Math.random() < 0.5;
-    for (let i = 0; i < BALL_COUNT; i++) {
-      const t = i / (BALL_COUNT - 1);
-      const along = (t - 0.5) * 2.8;
-      const taper = tipHeavy ? t : 1 - t; // 0..1 fat end
-      const fat = 0.35 + taper * 0.85;
-      const swirl = Math.sin(t * Math.PI * 1.2) * 0.22;
+      const along = (t - 0.5) * 3.2 + (Math.random() - 0.5) * 0.35;
+      const bulge = Math.sin(t * Math.PI);
+      const a = side + (t - 0.5) * 0.55 + (Math.random() - 0.5) * 0.35;
+      const r = 0.55 + bulge * 0.2 + Math.random() * 0.15;
       const p = new THREE.Vector3(
-        Math.cos(yaw) * swirl,
-        Math.sin(yaw) * swirl * 0.9,
+        Math.cos(a) * r + (Math.random() - 0.5) * 0.25,
+        Math.sin(a) * r + (Math.random() - 0.5) * 0.25,
         along
       );
       localRest.push(p.clone());
       localPos.push(p.clone());
       vel.push(new THREE.Vector3());
-      radii.push(0.42 + fat * 0.55 + (i === 0 || i === BALL_COUNT - 1 ? -0.08 : 0));
-      // Teardrop stretch: skinny XY, long Z; fatter end gets rounder axes
+      radii.push(0.35 + Math.random() * 0.55 + bulge * 0.25);
       axes.push(
         new THREE.Vector3(
-          0.78 + fat * 0.18,
-          0.82 + fat * 0.16,
-          1.22 + (1 - fat) * 0.28
+          0.7 + Math.random() * 0.35,
+          0.75 + Math.random() * 0.3,
+          1.05 + Math.random() * 0.45
+        )
+      );
+    }
+  } else {
+    // Amoeba / peanut cluster — unequal lobes like rim cells
+    const yaw = Math.random() * Math.PI * 2;
+    for (let i = 0; i < BALL_COUNT; i++) {
+      const lobe = i / BALL_COUNT;
+      const ang = yaw + lobe * Math.PI * 2 * (0.7 + Math.random() * 0.4);
+      const orbit = 0.15 + Math.random() * 0.55;
+      const along = (Math.random() - 0.5) * 2.4;
+      const p = new THREE.Vector3(
+        Math.cos(ang) * orbit,
+        Math.sin(ang) * orbit * (0.7 + Math.random() * 0.5),
+        along
+      );
+      localRest.push(p.clone());
+      localPos.push(p.clone());
+      vel.push(new THREE.Vector3());
+      // Big + small satellite droplets (rim has satellites)
+      const big = Math.random() < 0.35;
+      radii.push(big ? 0.7 + Math.random() * 0.35 : 0.28 + Math.random() * 0.35);
+      axes.push(
+        new THREE.Vector3(
+          0.75 + Math.random() * 0.4,
+          0.7 + Math.random() * 0.45,
+          0.9 + Math.random() * 0.5
         )
       );
     }
@@ -235,7 +270,6 @@ export function createGoopMetaball(mode = 'seam') {
   const worldCenters = localPos.map(() => new THREE.Vector3());
   const worldAxes = axes.map((a) => a.clone());
 
-  // strength so single-ball zero-ish shell ≈ radius (addBall: r² = s/(isol+sub))
   for (let i = 0; i < BALL_COUNT; i++) {
     const r = radii[i];
     strengths.push((ISOL + SUBTRACT) * r * r);
@@ -249,9 +283,6 @@ export function createGoopMetaball(mode = 'seam') {
     uStrength: { value: strengths },
     uSubtract: { value: SUBTRACT },
     uIsol: { value: ISOL },
-    uRim: { value: new THREE.Color(0xff2bd6) },
-    uCore: { value: new THREE.Color(0x00e5ff) },
-    uHot: { value: new THREE.Color(0xc8ff00) },
     uBoundCenter: { value: new THREE.Vector3() },
     uBoundRadius: { value: 5.5 },
   };
@@ -265,14 +296,12 @@ export function createGoopMetaball(mode = 'seam') {
     fragmentShader: FRAG,
   });
 
-  // Bound covers the long pill; mesh itself stays roughly spherical for culling
   const boundR = mode === 'seam' ? 6.2 : 4.8;
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(boundR, 28, 20), mat);
-  // Extra non-uniform stretch on the shell reinforces the lamp silhouette
   if (mode === 'seam') {
-    mesh.scale.set(1.05, 1.05, 1.4);
+    mesh.scale.set(1.05, 1.05, 1.35);
   } else {
-    mesh.scale.set(1.0, 1.08, 1.45);
+    mesh.scale.set(1.05, 1.1, 1.25);
   }
   uniforms.uBoundRadius.value = boundR;
 
@@ -291,21 +320,20 @@ export function createGoopMetaball(mode = 'seam') {
 
     for (let i = 0; i < BALL_COUNT; i++) {
       const target = localRest[i].clone();
-      const w = time * (0.42 + i * 0.025) + phase;
-      // Slow thick bob — more along the long axis than radial puff
-      target.x += Math.sin(w) * 0.08;
-      target.y += Math.cos(w * 0.85) * 0.07;
-      target.z += Math.sin(w * 0.55 + i * 0.4) * 0.18;
+      const w = time * (0.38 + i * 0.03) + phase;
+      // Lazy lava-lamp drift — keep lobes merging / splitting feel
+      target.x += Math.sin(w) * 0.14;
+      target.y += Math.cos(w * 0.9) * 0.12;
+      target.z += Math.sin(w * 0.5 + i) * 0.2;
 
       const c = localPos[i];
       const v = vel[i];
-      v.addScaledVector(target.sub(c).multiplyScalar(5.5), dt);
-      v.multiplyScalar(0.94);
+      v.addScaledVector(target.sub(c).multiplyScalar(4.2), dt);
+      v.multiplyScalar(0.93);
       c.addScaledVector(v, dt);
 
-      // Allow longer Z travel so the chain stays a pill, not a ball
-      const maxXY = mode === 'seam' ? 1.1 : 0.55;
-      const maxZ = mode === 'seam' ? 2.2 : 1.7;
+      const maxXY = mode === 'seam' ? 1.35 : 0.95;
+      const maxZ = mode === 'seam' ? 2.3 : 1.9;
       const xy = Math.hypot(c.x, c.y);
       if (xy > maxXY) {
         const s = maxXY / xy;
@@ -314,14 +342,13 @@ export function createGoopMetaball(mode = 'seam') {
       }
       if (Math.abs(c.z) > maxZ) c.z = Math.sign(c.z) * maxZ;
 
-      radii[i] = baseRadii[i] + 0.11 * Math.sin(time * 1.35 + i * 1.1 + phase);
+      radii[i] = baseRadii[i] + 0.14 * Math.sin(time * 1.2 + i * 1.3 + phase);
       strengths[i] = (ISOL + SUBTRACT) * radii[i] * radii[i];
 
       _tmp.copy(c);
       mesh.localToWorld(_tmp);
       worldCenters[i].copy(_tmp);
 
-      // Axes in world units ≈ local axes * mesh scale
       _scale.set(sx, sy, sz);
       _ax.copy(axes[i]).multiply(_scale);
       worldAxes[i].copy(_ax);
