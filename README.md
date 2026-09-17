@@ -46,3 +46,9 @@ Story, multiplayer, crafting, bosses, inventory.
 ## Repo
 
 https://github.com/ghostrunner42/galactic-acid
+
+## Tunnel rim (Hippie Bot tiles)
+- `assets/tunnel/seamless-a.png` — primary lava skin
+- `assets/tunnel/seamless-b.png` — diagonal mix-in
+- `assets/tunnel/variants-4x4.png` — procedural sprinkle
+Continuous cylinder + UV scroll; tile remix ~¼ scroll feel.
