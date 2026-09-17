@@ -13,8 +13,8 @@ const LIME = 0xc8ff00;
 const VIOLET = 0x8b00ff;
 
 /**
- * Player craft — Quaternius Spaceship (CC0) from Poly Pizza
- * https://poly.pizza/m/u105mYHLHU
+ * Player craft — "ricks ufo" by eeee (CC-BY) from Poly Pizza
+ * https://poly.pizza/m/q6vNUoHZXr
  */
 export class Player {
   constructor(scene) {
@@ -56,7 +56,7 @@ export class Player {
   _loadShip() {
     const loader = new GLTFLoader();
     loader.load(
-      'assets/ship/spaceship.glb',
+      'assets/ship/ricks-ufo.glb',
       (gltf) => {
         const obj = gltf.scene;
         obj.traverse((c) => {
@@ -76,12 +76,11 @@ export class Player {
         const size = new THREE.Vector3();
         box.getSize(size);
         const maxDim = Math.max(size.x, size.y, size.z) || 1;
-        obj.scale.setScalar(1.9 / maxDim);
+        // Saucer reads bigger than a fighter needle
+        obj.scale.setScalar(2.4 / maxDim);
 
-        // Aim nose down the tunnel (-Z)
-        obj.rotation.y = Math.PI;
-        // Many Quaternius ships are Y-up; tip forward
-        obj.rotation.x = Math.PI / 2;
+        // Keep UFO Y-up; yaw so front faces down-tunnel (-Z)
+        obj.rotation.set(0, Math.PI, 0);
 
         const box2 = new THREE.Box3().setFromObject(obj);
         const center = new THREE.Vector3();

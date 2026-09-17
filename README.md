@@ -58,4 +58,5 @@ Continuous cylinder + UV scroll; tile remix ~¼ scroll feel.
 - Continuous cylinder + UV scroll; nearest-neighbor filter
 
 ## Ship credit
-Player craft: **Quaternius Spaceship** ([Poly Pizza](https://poly.pizza/m/u105mYHLHU), CC0) via `assets/ship/spaceship.glb`. Spitfire OBJ kept as backup.
+Player craft: **[ricks ufo](https://poly.pizza/m/q6vNUoHZXr)** by [eeee](https://poly.pizza) — **CC-BY** (attribution required).
+

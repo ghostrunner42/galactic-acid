@@ -46,3 +46,5 @@ canvas { display: block; width: 100%; height: 100%; }
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
 }
+
+.credit{font-size:0.75rem;opacity:0.65;margin-top:0.4rem;}
