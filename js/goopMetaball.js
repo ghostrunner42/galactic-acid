@@ -3,8 +3,9 @@ import * as THREE from 'three';
 const BALL_COUNT = 6;
 
 /**
- * Lava-lamp metaball: elongated fused mass, not a round bubble.
- * World-space raymarch; centers chain along an axis with taper radii.
+ * Lava-lamp metaball: classic reciprocal field (Three.js MarchingCubes.addBall /
+ * webglsamples blob) raymarched on GPU — no CPU mesh rebuild.
+ * Field: sum( strength/(ε+r²) - subtract ); SDF ≈ (isol - field) / |∇field|.
  */
 const VERT = /* glsl */ `
 varying vec3 vWorldPos;
@@ -22,6 +23,9 @@ uniform float uTime;
 uniform vec3 uCenters[6];
 uniform float uRadii[6];
 uniform vec3 uAxes[6];
+uniform float uStrength[6];
+uniform float uSubtract;
+uniform float uIsol;
 uniform vec3 uRim;
 uniform vec3 uCore;
 uniform vec3 uHot;
@@ -30,28 +34,54 @@ uniform float uBoundRadius;
 
 varying vec3 vWorldPos;
 
-float smin(float a, float b, float k) {
-  float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-  return mix(b, a, h) - k * h * (1.0 - h);
-}
-
-// Ellipsoid ball: stretch keeps fused clumps from reading as spheres
-float ellipsoid(vec3 p, vec3 c, float r, vec3 ax) {
+// One ball contrib — matches MarchingCubes.addBall reciprocal
+float ballVal(vec3 p, vec3 c, float strength, vec3 ax) {
   vec3 q = (p - c) / ax;
-  return (length(q) - r) * min(min(ax.x, ax.y), ax.z);
+  float r2 = dot(q, q);
+  return strength / (0.000001 + r2) - uSubtract;
 }
 
-float mapScene(vec3 p) {
-  float d = 1e5;
+float fieldScene(vec3 p) {
+  float f = 0.0;
   for (int i = 0; i < 6; i++) {
-    float bi = ellipsoid(p, uCenters[i], uRadii[i], uAxes[i]);
-    d = smin(d, bi, 0.95);
+    float v = ballVal(p, uCenters[i], uStrength[i], uAxes[i]);
+    // addBall only accumulates when val > 0 (fade-out radius)
+    if (v > 0.0) f += v;
   }
-  return d;
+  return f;
+}
+
+// Analytic ∇ of strength/(ε+|q|²) with q=(p-c)/ax, then chain-rule / ax
+vec3 fieldGrad(vec3 p) {
+  vec3 g = vec3(0.0);
+  for (int i = 0; i < 6; i++) {
+    vec3 ax = uAxes[i];
+    vec3 q = (p - uCenters[i]) / ax;
+    float r2 = dot(q, q);
+    float denom = 0.000001 + r2;
+    float v = uStrength[i] / denom - uSubtract;
+    if (v > 0.0) {
+      // d/dq (s/denom) = -2 s q / denom² ; dq/dp = 1/ax
+      vec3 dq = (-2.0 * uStrength[i] * q) / (denom * denom);
+      g += dq / ax;
+    }
+  }
+  return g;
+}
+
+// Approximate SDF so sphere-tracing still works
+float mapScene(vec3 p) {
+  float f = fieldScene(p);
+  float g = length(fieldGrad(p));
+  return (uIsol - f) / max(g, 0.08);
 }
 
 vec3 calcNormal(vec3 p) {
-  const float e = 0.025;
+  // Field rises toward centers → ∇field points inward; flip for outward N
+  vec3 g = fieldGrad(p);
+  float gl = length(g);
+  if (gl > 1e-5) return normalize(-g);
+  const float e = 0.03;
   return normalize(vec3(
     mapScene(p + vec3(e, 0.0, 0.0)) - mapScene(p - vec3(e, 0.0, 0.0)),
     mapScene(p + vec3(0.0, e, 0.0)) - mapScene(p - vec3(0.0, e, 0.0)),
@@ -80,27 +110,28 @@ void main() {
 
   float t = tEnter;
   float hit = -1.0;
-  for (int i = 0; i < 80; i++) {
+  for (int i = 0; i < 96; i++) {
     vec3 p = ro + rd * t;
-    if (length(p - uBoundCenter) > uBoundRadius + 0.25) break;
+    if (length(p - uBoundCenter) > uBoundRadius + 0.35) break;
     float d = mapScene(p);
-    if (d < 0.018) { hit = t; break; }
-    t += clamp(d, 0.012, 0.26);
-    if (t > tEnter + uBoundRadius * 2.6) break;
+    if (d < 0.02) { hit = t; break; }
+    // Conservative step — |grad| SDF can undershoot lipschitz near merges
+    t += clamp(d * 0.8, 0.01, 0.22);
+    if (t > tEnter + uBoundRadius * 2.8) break;
   }
 
   if (hit < 0.0) discard;
 
   vec3 p = ro + rd * hit;
   vec3 n = calcNormal(p);
-  // Soften normals a touch so ellipsoids read jelly, not hard plastic
+  // Soften so wax reads jelly, not hard plastic
   n = normalize(mix(n, -rd, 0.12));
   vec3 view = normalize(ro - p);
   float ndv = max(dot(n, view), 0.0);
   float fres = pow(1.0 - ndv, 1.65);
   float fresSoft = pow(1.0 - ndv, 3.2);
 
-  // Fake thickness: peek a bit inside along the view
+  // Fake thickness: peek inside along the view
   float thick = 0.0;
   vec3 pi = p - view * 0.35;
   for (int j = 0; j < 4; j++) {
@@ -145,6 +176,12 @@ export function createGoopMetaball(mode = 'seam') {
   const vel = [];
   const radii = [];
   const axes = [];
+  const strengths = [];
+
+  // Reciprocal field params — world-space cousin of demo subtract/isol
+  // Isol surface size ≈ radius when strength ≈ (isol+subtract)*r²
+  const SUBTRACT = 2.4;
+  const ISOL = 1.0;
 
   if (mode === 'seam') {
     // Long wall ribbon — span Z hard so it never reads as a marble
@@ -198,11 +235,20 @@ export function createGoopMetaball(mode = 'seam') {
   const worldCenters = localPos.map(() => new THREE.Vector3());
   const worldAxes = axes.map((a) => a.clone());
 
+  // strength so single-ball zero-ish shell ≈ radius (addBall: r² = s/(isol+sub))
+  for (let i = 0; i < BALL_COUNT; i++) {
+    const r = radii[i];
+    strengths.push((ISOL + SUBTRACT) * r * r);
+  }
+
   const uniforms = {
     uTime: { value: 0 },
     uCenters: { value: worldCenters },
     uRadii: { value: radii },
     uAxes: { value: worldAxes },
+    uStrength: { value: strengths },
+    uSubtract: { value: SUBTRACT },
+    uIsol: { value: ISOL },
     uRim: { value: new THREE.Color(0xff2bd6) },
     uCore: { value: new THREE.Color(0x00e5ff) },
     uHot: { value: new THREE.Color(0xc8ff00) },
@@ -239,7 +285,6 @@ export function createGoopMetaball(mode = 'seam') {
     uniforms.uTime.value = time;
     mesh.updateWorldMatrix(true, false);
 
-    // World-space axis stretch from mesh scale (keeps ellipsoids oriented)
     const sx = mesh.scale.x;
     const sy = mesh.scale.y;
     const sz = mesh.scale.z;
@@ -270,6 +315,7 @@ export function createGoopMetaball(mode = 'seam') {
       if (Math.abs(c.z) > maxZ) c.z = Math.sign(c.z) * maxZ;
 
       radii[i] = baseRadii[i] + 0.11 * Math.sin(time * 1.35 + i * 1.1 + phase);
+      strengths[i] = (ISOL + SUBTRACT) * radii[i] * radii[i];
 
       _tmp.copy(c);
       mesh.localToWorld(_tmp);
@@ -286,6 +332,7 @@ export function createGoopMetaball(mode = 'seam') {
     uniforms.uRadii.value = radii;
     uniforms.uCenters.value = worldCenters;
     uniforms.uAxes.value = worldAxes;
+    uniforms.uStrength.value = strengths;
   }
 
   function pinch() {
