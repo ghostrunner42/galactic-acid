@@ -63,3 +63,4 @@ Player craft: **[ricks ufo](https://poly.pizza/m/q6vNUoHZXr)** by [eeee](https:/
 
 
 Goop hazard: GPU raymarched SDF metaballs (`js/goopMetaball.js`).
+Lava seams: large raymarched metaball banks (`js/goopMetaball.js`) — weave gaps, shoot to pinch.

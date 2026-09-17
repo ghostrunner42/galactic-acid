@@ -6,7 +6,7 @@ import { createGoopMetaball } from './goopMetaball.js';
  * Hazard identity (locked Hippie Bot):
  * 1. goldAsteroid — warm metallic shootable; blast = sharp gold shards + white flash
  * 2. jellyAlien — soft cyan→violet biolum; DODGE ONLY (shots no-op)
- * 3. gelGoop — raymarched SDF metaball shootable (magenta fresnel, cyan→lime guts); wet splat + pinch
+ * 3. gelGoop — LARGE raymarched lava SEAMS to weave through (Bonanza-ish); shootable; wet splat + pinch
  */
 
 const SPAWN_AHEAD = 90;
@@ -103,7 +103,7 @@ export class HazardManager {
     // ~40% gold / ~30% gel goop / ~30% alien
     const r = Math.random();
     const h =
-      r < 0.35
+      r < 0.4
         ? this._makeGoldAsteroid(z)
         : r < 0.75
           ? this._makeGelGoop(z)
@@ -175,24 +175,26 @@ export class HazardManager {
 
   _makeGelGoop(z) {
     const group = new THREE.Group();
+    // Park near the tube wall so seams feel like lava banks with a fly corridor
     const ang = Math.random() * Math.PI * 2;
-    const rad = Math.random() * (TUBE_RADIUS - 3.6);
+    const rad = TUBE_RADIUS * 0.35 + Math.random() * (TUBE_RADIUS * 0.25);
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
-    const goop = createGoopMetaball();
+    const goop = createGoopMetaball('seam');
     group.add(goop.mesh);
 
     return {
       mesh: group,
       shootable: true,
-      hitRadius: 1.6,
+      hitRadius: 3.2,
       kind: 'goop',
       _goop: goop,
       update(dt, time) {
         goop.update(dt, time);
       },
       collides(pPos, pR) {
-        return group.position.distanceTo(pPos) < 1.6 + pR;
+        // Approximate — big seam mass
+        return group.position.distanceTo(pPos) < 3.2 + pR;
       },
     };
   }
