@@ -3,9 +3,8 @@ import * as THREE from 'three';
 const BALL_COUNT = 6;
 
 /**
- * Large navigable lava-seam metaball.
- * World-space raymarch; no red fallback shell (that was the bug).
- * Centers arranged as a wall/blob mass with gaps to weave through.
+ * Lava-lamp metaball: elongated fused mass, not a round bubble.
+ * World-space raymarch; centers chain along an axis with taper radii.
  */
 const VERT = /* glsl */ `
 varying vec3 vWorldPos;
@@ -22,6 +21,7 @@ precision highp float;
 uniform float uTime;
 uniform vec3 uCenters[6];
 uniform float uRadii[6];
+uniform vec3 uAxes[6];
 uniform vec3 uRim;
 uniform vec3 uCore;
 uniform vec3 uHot;
@@ -35,11 +35,17 @@ float smin(float a, float b, float k) {
   return mix(b, a, h) - k * h * (1.0 - h);
 }
 
+// Ellipsoid ball: stretch keeps fused clumps from reading as spheres
+float ellipsoid(vec3 p, vec3 c, float r, vec3 ax) {
+  vec3 q = (p - c) / ax;
+  return (length(q) - r) * min(min(ax.x, ax.y), ax.z);
+}
+
 float mapScene(vec3 p) {
   float d = 1e5;
   for (int i = 0; i < 6; i++) {
-    float bi = length(p - uCenters[i]) - uRadii[i];
-    d = smin(d, bi, 1.15);
+    float bi = ellipsoid(p, uCenters[i], uRadii[i], uAxes[i]);
+    d = smin(d, bi, 0.95);
   }
   return d;
 }
@@ -74,16 +80,15 @@ void main() {
 
   float t = tEnter;
   float hit = -1.0;
-  for (int i = 0; i < 72; i++) {
+  for (int i = 0; i < 80; i++) {
     vec3 p = ro + rd * t;
-    if (length(p - uBoundCenter) > uBoundRadius + 0.2) break;
+    if (length(p - uBoundCenter) > uBoundRadius + 0.25) break;
     float d = mapScene(p);
     if (d < 0.02) { hit = t; break; }
-    t += clamp(d, 0.015, 0.28);
-    if (t > tEnter + uBoundRadius * 2.5) break;
+    t += clamp(d, 0.012, 0.26);
+    if (t > tEnter + uBoundRadius * 2.6) break;
   }
 
-  // No fallback rim — miss = transparent (kills the red circle bug)
   if (hit < 0.0) discard;
 
   vec3 p = ro + rd * hit;
@@ -91,7 +96,7 @@ void main() {
   vec3 view = normalize(ro - p);
   float fres = pow(1.0 - max(dot(n, view), 0.0), 2.2);
 
-  float pulse = 0.5 + 0.5 * sin(uTime * 1.6 + p.x * 1.8 + p.y * 1.4 + p.z * 0.6);
+  float pulse = 0.5 + 0.5 * sin(uTime * 1.4 + p.x * 1.5 + p.y * 1.2 + p.z * 0.55);
   vec3 guts = mix(uCore, uHot, pulse * 0.7);
   vec3 col = mix(guts, uRim, fres * 0.85);
   col += uHot * 0.2 * (1.0 - fres);
@@ -103,61 +108,78 @@ void main() {
 
 /**
  * @param {'blob'|'seam'} mode
- *  blob = chunky floating mass
- *  seam = wall-hugging lava you weave past (Bonanza-ish)
+ *  blob = elongated floating lamp mass (teardrop / pill)
+ *  seam = wall-hugging lava ribbon you weave past
  */
 export function createGoopMetaball(mode = 'seam') {
   const localRest = [];
   const localPos = [];
   const vel = [];
   const radii = [];
+  const axes = [];
 
   if (mode === 'seam') {
-    // Tight arc — centers stay close so smin reads as ONE molten bank
+    // Long wall ribbon — span Z hard so it never reads as a marble
     const side = Math.random() * Math.PI * 2;
     for (let i = 0; i < BALL_COUNT; i++) {
-      const along = (i / (BALL_COUNT - 1) - 0.5) * 1.6;
-      const spread = (i % 3 - 1) * 0.28;
-      const a = side + spread * 0.45;
-      const r = 0.55 + (i % 2) * 0.15;
+      const t = i / (BALL_COUNT - 1);
+      const along = (t - 0.5) * 3.4;
+      const bulge = Math.sin(t * Math.PI); // fat mid, thin ends
+      const a = side + (t - 0.5) * 0.35 + (i % 2) * 0.08;
+      const r = 0.62 + bulge * 0.12;
+      const p = new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, along);
+      localRest.push(p.clone());
+      localPos.push(p.clone());
+      vel.push(new THREE.Vector3());
+      // Taper radii: thick mid lobe
+      radii.push(0.55 + bulge * 0.55 + Math.random() * 0.08);
+      // Flatten against wall, stretch along flight
+      axes.push(new THREE.Vector3(0.72, 0.85, 1.45 + bulge * 0.35));
+    }
+  } else {
+    // Classic lava-lamp blob: chain along Z, fat bulb + thinner neck
+    const yaw = Math.random() * Math.PI * 2;
+    const tipHeavy = Math.random() < 0.5;
+    for (let i = 0; i < BALL_COUNT; i++) {
+      const t = i / (BALL_COUNT - 1);
+      const along = (t - 0.5) * 2.8;
+      const taper = tipHeavy ? t : 1 - t; // 0..1 fat end
+      const fat = 0.35 + taper * 0.85;
+      const swirl = Math.sin(t * Math.PI * 1.2) * 0.22;
       const p = new THREE.Vector3(
-        Math.cos(a) * r,
-        Math.sin(a) * r,
+        Math.cos(yaw) * swirl,
+        Math.sin(yaw) * swirl * 0.9,
         along
       );
       localRest.push(p.clone());
       localPos.push(p.clone());
       vel.push(new THREE.Vector3());
-      radii.push(1.15 + Math.random() * 0.35);
-    }
-  } else {
-    // Bubble: packed cluster → single lava-lamp blob
-    for (let i = 0; i < BALL_COUNT; i++) {
-      const a = (i / BALL_COUNT) * Math.PI * 2;
-      const r = 0.15 + (i % 3) * 0.08;
-      const p = new THREE.Vector3(
-        Math.cos(a) * r,
-        Math.sin(a * 1.1) * r * 0.85,
-        Math.sin(a) * r * 0.4
+      radii.push(0.42 + fat * 0.55 + (i === 0 || i === BALL_COUNT - 1 ? -0.08 : 0));
+      // Teardrop stretch: skinny XY, long Z; fatter end gets rounder axes
+      axes.push(
+        new THREE.Vector3(
+          0.65 + fat * 0.25,
+          0.7 + fat * 0.22,
+          1.35 + (1 - fat) * 0.45
+        )
       );
-      localRest.push(p.clone());
-      localPos.push(p.clone());
-      vel.push(new THREE.Vector3());
-      radii.push(1.05 + (i % 3) * 0.12);
     }
   }
 
+  const baseRadii = radii.slice();
   const worldCenters = localPos.map(() => new THREE.Vector3());
+  const worldAxes = axes.map((a) => a.clone());
 
   const uniforms = {
     uTime: { value: 0 },
     uCenters: { value: worldCenters },
     uRadii: { value: radii },
+    uAxes: { value: worldAxes },
     uRim: { value: new THREE.Color(0xff2bd6) },
     uCore: { value: new THREE.Color(0x00e5ff) },
     uHot: { value: new THREE.Color(0xc8ff00) },
     uBoundCenter: { value: new THREE.Vector3() },
-    uBoundRadius: { value: 4.5 },
+    uBoundRadius: { value: 5.5 },
   };
 
   const mat = new THREE.ShaderMaterial({
@@ -169,52 +191,73 @@ export function createGoopMetaball(mode = 'seam') {
     fragmentShader: FRAG,
   });
 
-  // Big bound so seams read as environment, not marbles
-  const boundR = mode === 'seam' ? 5.2 : 3.6;
+  // Bound covers the long pill; mesh itself stays roughly spherical for culling
+  const boundR = mode === 'seam' ? 6.2 : 4.8;
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(boundR, 28, 20), mat);
-  mesh.scale.set(1, 1, mode === 'seam' ? 1.35 : 1.1);
+  // Extra non-uniform stretch on the shell reinforces the lamp silhouette
+  if (mode === 'seam') {
+    mesh.scale.set(1.05, 1.05, 1.55);
+  } else {
+    mesh.scale.set(0.95, 1.05, 1.65);
+  }
   uniforms.uBoundRadius.value = boundR;
 
   const phase = Math.random() * Math.PI * 2;
   const _tmp = new THREE.Vector3();
+  const _ax = new THREE.Vector3();
+  const _scale = new THREE.Vector3();
 
   function update(dt, time) {
     uniforms.uTime.value = time;
     mesh.updateWorldMatrix(true, false);
 
+    // World-space axis stretch from mesh scale (keeps ellipsoids oriented)
+    const sx = mesh.scale.x;
+    const sy = mesh.scale.y;
+    const sz = mesh.scale.z;
+
     for (let i = 0; i < BALL_COUNT; i++) {
       const target = localRest[i].clone();
-      const w = time * (0.55 + i * 0.03) + phase;
-      // Lava-lamp bob — slow, thick
-      target.x += Math.sin(w) * 0.12;
-      target.y += Math.cos(w * 0.9) * 0.12;
-      target.z += Math.sin(w * 0.7 + i) * 0.1;
+      const w = time * (0.42 + i * 0.025) + phase;
+      // Slow thick bob — more along the long axis than radial puff
+      target.x += Math.sin(w) * 0.08;
+      target.y += Math.cos(w * 0.85) * 0.07;
+      target.z += Math.sin(w * 0.55 + i * 0.4) * 0.18;
 
       const c = localPos[i];
       const v = vel[i];
-      v.addScaledVector(target.sub(c).multiplyScalar(6), dt);
-      v.multiplyScalar(0.93);
+      v.addScaledVector(target.sub(c).multiplyScalar(5.5), dt);
+      v.multiplyScalar(0.94);
       c.addScaledVector(v, dt);
 
-      const maxR = mode === 'seam' ? 1.4 : 0.85;
-      if (c.length() > maxR) c.setLength(maxR);
+      // Allow longer Z travel so the chain stays a pill, not a ball
+      const maxXY = mode === 'seam' ? 1.1 : 0.55;
+      const maxZ = mode === 'seam' ? 2.2 : 1.7;
+      const xy = Math.hypot(c.x, c.y);
+      if (xy > maxXY) {
+        const s = maxXY / xy;
+        c.x *= s;
+        c.y *= s;
+      }
+      if (Math.abs(c.z) > maxZ) c.z = Math.sign(c.z) * maxZ;
 
-      radii[i] =
-        (mode === 'seam' ? 1.15 : 1.05) +
-        0.1 * Math.sin(time * 1.1 + i + phase);
+      radii[i] = baseRadii[i] + 0.06 * Math.sin(time * 0.9 + i + phase);
 
       _tmp.copy(c);
       mesh.localToWorld(_tmp);
       worldCenters[i].copy(_tmp);
+
+      // Axes in world units ≈ local axes * mesh scale
+      _scale.set(sx, sy, sz);
+      _ax.copy(axes[i]).multiply(_scale);
+      worldAxes[i].copy(_ax);
     }
 
     mesh.getWorldPosition(uniforms.uBoundCenter.value);
-    // Approx world bound radius accounting for non-uniform scale
-    const sx = mesh.scale.x;
-    const sz = mesh.scale.z;
-    uniforms.uBoundRadius.value = boundR * Math.max(sx, sz);
+    uniforms.uBoundRadius.value = boundR * Math.max(sx, sy, sz);
     uniforms.uRadii.value = radii;
     uniforms.uCenters.value = worldCenters;
+    uniforms.uAxes.value = worldAxes;
   }
 
   function pinch() {

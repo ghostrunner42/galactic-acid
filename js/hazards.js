@@ -138,8 +138,11 @@ export class HazardManager {
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
     const goop = createGoopMetaball('blob');
-    // Extra chunky bubble
-    goop.mesh.scale.multiplyScalar(1.35 + Math.random() * 0.4);
+    // Stretch into a lamp pill — avoid round marble look
+    const stretch = 1.15 + Math.random() * 0.25;
+    goop.mesh.scale.x *= 0.95 + Math.random() * 0.1;
+    goop.mesh.scale.y *= 1.05 + Math.random() * 0.15;
+    goop.mesh.scale.z *= stretch;
     group.add(goop.mesh);
 
     return {
