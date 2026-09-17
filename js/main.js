@@ -14,8 +14,8 @@ let score = 0;
 let survivalAcc = 0;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x120028, 0.028);
-scene.background = new THREE.Color(0x080018);
+scene.fog = new THREE.FogExp2(0x0a0018, 0.026);
+scene.background = new THREE.Color(0x050010);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 400);
 camera.position.set(0, 0, 6);

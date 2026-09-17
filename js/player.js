@@ -7,6 +7,12 @@ const FIRE_COOLDOWN = 0.18;
 const LASER_SPEED = 90;
 const LASER_LIFE = 1.4;
 
+/** Locked accents for ship / lasers */
+const MAGENTA = 0xff2bd6;
+const CYAN = 0x00e5ff;
+const LIME = 0xc8ff00;
+const VIOLET = 0x8b00ff;
+
 export class Player {
   constructor(scene) {
     this.scene = scene;
@@ -35,28 +41,28 @@ export class Player {
 
     const body = new THREE.Mesh(
       new THREE.ConeGeometry(0.45, 1.6, 4),
-      new THREE.MeshBasicMaterial({ color: 0x66ffee })
+      new THREE.MeshBasicMaterial({ color: CYAN })
     );
     body.rotation.x = Math.PI / 2;
     g.add(body);
 
     const wingL = new THREE.Mesh(
       new THREE.BoxGeometry(1.4, 0.08, 0.5),
-      new THREE.MeshBasicMaterial({ color: 0xff44cc })
+      new THREE.MeshBasicMaterial({ color: MAGENTA })
     );
     wingL.position.set(0, 0, 0.35);
     g.add(wingL);
 
     const cockpit = new THREE.Mesh(
       new THREE.SphereGeometry(0.22, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffff88 })
+      new THREE.MeshBasicMaterial({ color: LIME })
     );
     cockpit.position.set(0, 0.15, -0.2);
     g.add(cockpit);
 
     const glow = new THREE.Mesh(
       new THREE.SphereGeometry(0.18, 6, 6),
-      new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.8 })
+      new THREE.MeshBasicMaterial({ color: VIOLET, transparent: true, opacity: 0.85 })
     );
     glow.position.set(0, 0, 0.85);
     g.add(glow);
@@ -86,7 +92,6 @@ export class Player {
       this.offset.y += (dy / len) * MOVE_SPEED * dt;
     }
 
-    // Clamp inside tube
     const r = this.offset.length();
     if (r > MAX_OFFSET) this.offset.multiplyScalar(MAX_OFFSET / r);
 
@@ -106,7 +111,6 @@ export class Player {
       this.fireTimer = FIRE_COOLDOWN;
     }
 
-    // Update lasers
     for (let i = this.lasers.length - 1; i >= 0; i--) {
       const L = this.lasers[i];
       L.mesh.position.z -= LASER_SPEED * dt;
@@ -123,7 +127,7 @@ export class Player {
   _fire() {
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6),
-      new THREE.MeshBasicMaterial({ color: 0xaaff00 })
+      new THREE.MeshBasicMaterial({ color: LIME })
     );
     mesh.rotation.x = Math.PI / 2;
     mesh.position.set(this.offset.x, this.offset.y, this.z - 1.2);

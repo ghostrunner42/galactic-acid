@@ -1,8 +1,10 @@
 # Galactic Acid
 
-Trippy infinite wormhole shooter — Starfox-like rail flight down an endless neon tunnel.
+Trippy infinite wormhole shooter — Starfox-like rail flight down an endless neon lava-lamp tunnel.
 
-**Jam slice:** v0 for eng bot Rex.
+**Art direction:** locked Hippie Bot palette (magenta / cyan / lime / violet rim; warm gold shootables; cool cyan→violet dodge aliens).
+
+**Jam slice:** v0 visual + hazard identity pass.
 
 ## Play locally
 
@@ -26,10 +28,10 @@ ES modules + importmap need a static server (not `file://`).
 
 ## What’s in this slice
 
-- Endless procedural/recycled tunnel with pulsing psychedelic wall colors
+- Endless recycled tunnel with **neon lava-lamp blob** walls (locked 4-color rim)
 - Rail flight (auto-forward; free L/R/U/D inside the tube)
-- 3 hazard types: **ring gates** (dodge the gap), **spike orbs** (shootable), **spinners** (dodge the bar)
-- Score from survival + orb kills; crash → game over → Space/click restart
+- 2 hazards: **gold asteroids** (shoot — shards + white flash) · **jelly aliens** (dodge only; shots pass through)
+- Score from survival + asteroid kills; crash → game over → Space/click restart
 - Neon HUD + depth fog; geometric ship (no external assets)
 
 ## Parked (not in v0)
