@@ -3,8 +3,9 @@ import { TUBE_RADIUS } from './tunnel.js';
 
 /**
  * Hazard identity (locked Hippie Bot):
- * 1. goldAsteroid — warm metallic shootable chunks; blast = sharp gold shards + white flash
- * 2. jellyAlien — soft cyan→violet bioluminescent jelly; DODGE ONLY (shots no-op)
+ * 1. goldAsteroid — warm metallic shootable; blast = sharp gold shards + white flash
+ * 2. jellyAlien — soft cyan→violet biolum; DODGE ONLY (shots no-op)
+ * 3. gelGoop — soft neon lava jelly shootable (magenta outline, cyan/lime guts); wet splat + split
  */
 
 const SPAWN_AHEAD = 90;
@@ -17,6 +18,8 @@ const GOLD_LO = 0x8a5a00;
 const AMBER = 0xffb000;
 const CYAN = 0x00e5ff;
 const VIOLET = 0x8b00ff;
+const MAGENTA = 0xff2bd6;
+const LIME = 0xc8ff00;
 
 export class HazardManager {
   constructor(scene) {
@@ -26,6 +29,19 @@ export class HazardManager {
     this.spawnTimer = 1.0;
     this.spawnInterval = SPAWN_INTERVAL_START;
     this.time = 0;
+
+    this._gelSheet = new THREE.TextureLoader().load(
+      'assets/hazards/gel-goop-sheet.png',
+      (tex) => {
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.NearestFilter;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+      }
+    );
+    this._gelSheet.magFilter = THREE.NearestFilter;
+    this._gelSheet.minFilter = THREE.NearestFilter;
+    this._gelSheet.colorSpace = THREE.SRGBColorSpace;
   }
 
   update(dt, playerZ, player, onScore) {
@@ -59,14 +75,13 @@ export class HazardManager {
             L.mesh.geometry.dispose();
             L.mesh.material.dispose();
             player.lasers.splice(li, 1);
-            this._blastAsteroid(h);
-            this._destroyHazard(i, onScore, 25);
+            if (h.kind === 'goop') this._blastGoop(h);
+            else this._blastAsteroid(h);
+            this._destroyHazard(i, onScore, h.kind === 'goop' ? 20 : 25);
             destroyed = true;
             break;
           }
         }
-      } else if (!h.shootable && player.alive) {
-        // Aliens: shots pass through / no-op — lasers keep flying
       }
 
       if (destroyed) continue;
@@ -84,8 +99,14 @@ export class HazardManager {
 
   _spawn(playerZ) {
     const z = playerZ - SPAWN_AHEAD - Math.random() * 20;
-    // ~55% gold asteroids (shoot), ~45% jelly aliens (dodge) — 2 hazard types
-    const h = Math.random() < 0.55 ? this._makeGoldAsteroid(z) : this._makeJellyAlien(z);
+    // ~40% gold / ~30% gel goop / ~30% alien
+    const r = Math.random();
+    const h =
+      r < 0.4
+        ? this._makeGoldAsteroid(z)
+        : r < 0.7
+          ? this._makeGelGoop(z)
+          : this._makeJellyAlien(z);
     this.hazards.push(h);
     this.scene.add(h.mesh);
   }
@@ -96,15 +117,17 @@ export class HazardManager {
     const rad = Math.random() * (TUBE_RADIUS - 3.2);
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
-    // Chunky irregular metallic silhouette (warm gold/amber — OUTSIDE rim strip)
     const core = new THREE.Mesh(
       new THREE.DodecahedronGeometry(0.75, 0),
       new THREE.MeshBasicMaterial({ color: GOLD })
     );
-    core.scale.set(1.1 + Math.random() * 0.4, 0.85 + Math.random() * 0.5, 1.0 + Math.random() * 0.35);
+    core.scale.set(
+      1.1 + Math.random() * 0.4,
+      0.85 + Math.random() * 0.5,
+      1.0 + Math.random() * 0.35
+    );
     group.add(core);
 
-    // Specular highlight facet
     const highlight = new THREE.Mesh(
       new THREE.TetrahedronGeometry(0.35, 0),
       new THREE.MeshBasicMaterial({ color: GOLD_HI })
@@ -112,7 +135,6 @@ export class HazardManager {
     highlight.position.set(0.35, 0.4, 0.25);
     group.add(highlight);
 
-    // Dark warm undertone chunk
     const chunk = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.4, 0),
       new THREE.MeshBasicMaterial({ color: GOLD_LO })
@@ -121,7 +143,6 @@ export class HazardManager {
     chunk.scale.set(1.2, 0.8, 1);
     group.add(chunk);
 
-    // Amber rim glint
     const glint = new THREE.Mesh(
       new THREE.SphereGeometry(0.18, 6, 6),
       new THREE.MeshBasicMaterial({ color: AMBER })
@@ -151,13 +172,157 @@ export class HazardManager {
     };
   }
 
+  _makeGelGoop(z) {
+    const group = new THREE.Group();
+    const ang = Math.random() * Math.PI * 2;
+    const rad = Math.random() * (TUBE_RADIUS - 3.4);
+    group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
+
+    // Soft teardrop / peanut — concept-art jelly volume
+    const peanut = Math.random() < 0.4;
+    const sx = peanut ? 1.45 : 0.95 + Math.random() * 0.15;
+    const sy = peanut ? 0.9 : 1.35 + Math.random() * 0.2;
+    const sz = peanut ? 0.95 : 0.95;
+
+    const gelMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uRim: { value: new THREE.Color(MAGENTA) },
+        uCore: { value: new THREE.Color(CYAN) },
+        uHot: { value: new THREE.Color(LIME) },
+        uTime: { value: 0 },
+        uPhase: { value: Math.random() * 6.28 },
+      },
+      vertexShader: `
+        varying vec3 vN;
+        varying vec3 vV;
+        void main() {
+          vec4 w = modelViewMatrix * vec4(position, 1.0);
+          vN = normalize(normalMatrix * normal);
+          vV = normalize(-w.xyz);
+          gl_Position = projectionMatrix * w;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uRim;
+        uniform vec3 uCore;
+        uniform vec3 uHot;
+        uniform float uTime;
+        uniform float uPhase;
+        varying vec3 vN;
+        varying vec3 vV;
+        void main() {
+          float fres = pow(1.0 - max(dot(vN, vV), 0.0), 2.4);
+          float pulse = 0.5 + 0.5 * sin(uTime * 2.2 + uPhase);
+          vec3 guts = mix(uCore, uHot, pulse * 0.65);
+          vec3 col = mix(guts, uRim, fres);
+          float alpha = mix(0.45, 0.95, fres);
+          // soft core glow
+          alpha = max(alpha, 0.55);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.82, 24, 18), gelMat);
+    body.scale.set(sx, sy, sz);
+    group.add(body);
+
+    // Magenta rim shell (BackSide) — thick neon outline read
+    const rim = new THREE.Mesh(
+      new THREE.SphereGeometry(0.88, 20, 16),
+      new THREE.MeshBasicMaterial({
+        color: MAGENTA,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.BackSide,
+        depthWrite: false,
+      })
+    );
+    rim.scale.copy(body.scale);
+    group.add(rim);
+
+    // Lime nucleus
+    const nucleus = new THREE.Mesh(
+      new THREE.SphereGeometry(0.28, 12, 10),
+      new THREE.MeshBasicMaterial({
+        color: LIME,
+        transparent: true,
+        opacity: 0.9,
+      })
+    );
+    group.add(nucleus);
+
+    // Cyan bubble cluster
+    const bubbles = [];
+    for (let i = 0; i < 5; i++) {
+      const b = new THREE.Mesh(
+        new THREE.SphereGeometry(0.06 + Math.random() * 0.08, 6, 6),
+        new THREE.MeshBasicMaterial({
+          color: CYAN,
+          transparent: true,
+          opacity: 0.75,
+        })
+      );
+      b.position.set(
+        (Math.random() - 0.5) * 0.55,
+        (Math.random() - 0.5) * 0.7,
+        (Math.random() - 0.5) * 0.45
+      );
+      group.add(b);
+      bubbles.push(b);
+    }
+
+    // Gloss specular dots (wet look)
+    for (let i = 0; i < 3; i++) {
+      const speck = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04, 6, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      speck.position.set(
+        0.25 + Math.random() * 0.25,
+        0.2 + Math.random() * 0.35,
+        0.35
+      );
+      group.add(speck);
+    }
+
+    const phase = Math.random() * Math.PI * 2;
+    const base = body.scale.clone();
+
+    return {
+      mesh: group,
+      shootable: true,
+      hitRadius: 1.1,
+      kind: 'goop',
+      update(dt, time) {
+        gelMat.uniforms.uTime.value = time;
+        const w = Math.sin(time * 1.5 + phase);
+        group.position.y += Math.sin(time * 1.05 + phase) * dt * 0.4;
+        group.position.x += Math.cos(time * 0.85 + phase) * dt * 0.22;
+        // squashy undulate — gel floats, rocks tumble
+        const squash = 1 + w * 0.14;
+        const stretch = 1 - w * 0.1;
+        body.scale.set(base.x * squash, base.y * stretch, base.z * squash);
+        rim.scale.copy(body.scale);
+        nucleus.material.opacity = 0.7 + Math.sin(time * 3.2 + phase) * 0.25;
+        for (const b of bubbles) {
+          b.position.y += Math.sin(time * 2 + b.position.x) * dt * 0.15;
+        }
+      },
+      collides(pPos, pR) {
+        return group.position.distanceTo(pPos) < 1.1 + pR;
+      },
+    };
+  }
+
   _makeJellyAlien(z) {
     const group = new THREE.Group();
     const ang = Math.random() * Math.PI * 2;
     const rad = Math.random() * (TUBE_RADIUS - 3.5);
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
-    // Soft bioluminescent body — cool cyan→violet only
     const body = new THREE.Mesh(
       new THREE.SphereGeometry(0.7, 12, 10),
       new THREE.MeshBasicMaterial({
@@ -180,7 +345,6 @@ export class HazardManager {
     );
     group.add(halo);
 
-    // Tentacles
     const tentacles = [];
     for (let t = 0; t < 5; t++) {
       const tent = new THREE.Mesh(
@@ -199,16 +363,19 @@ export class HazardManager {
       tentacles.push({ mesh: tent, phase: Math.random() * Math.PI * 2, ta });
     }
 
-    // Core pulse
     const core = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 })
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.55,
+      })
     );
     group.add(core);
 
     return {
       mesh: group,
-      shootable: false, // dodge only — shots pass through
+      shootable: false,
       hitRadius: 0.85,
       kind: 'alien',
       update(dt, time) {
@@ -228,9 +395,11 @@ export class HazardManager {
         core.material.opacity = 0.4 + Math.sin(time * 4) * 0.2;
         for (const t of tentacles) {
           t.mesh.rotation.x = 0.3 + Math.sin(time * 3.5 + t.phase) * 0.35;
-          t.mesh.rotation.z = Math.cos(t.ta) * 0.35 + Math.sin(time * 2.8 + t.phase) * 0.25;
-          const col = Math.sin(time * 2 + t.phase) > 0 ? CYAN : VIOLET;
-          t.mesh.material.color.setHex(col);
+          t.mesh.rotation.z =
+            Math.cos(t.ta) * 0.35 + Math.sin(time * 2.8 + t.phase) * 0.25;
+          t.mesh.material.color.setHex(
+            Math.sin(time * 2 + t.phase) > 0 ? CYAN : VIOLET
+          );
         }
         group.rotation.y += dt * 0.6;
       },
@@ -240,11 +409,8 @@ export class HazardManager {
     };
   }
 
-  /** Sharp gold shards + one white-hot flash (not glitter fog). */
   _blastAsteroid(h) {
     const origin = h.mesh.position.clone();
-
-    // White-hot flash — single brief burst
     const flash = new THREE.Mesh(
       new THREE.SphereGeometry(0.9, 8, 8),
       new THREE.MeshBasicMaterial({
@@ -258,33 +424,108 @@ export class HazardManager {
     this.scene.add(flash);
     this.fx.push({ mesh: flash, life: 0.12, maxLife: 0.12, kind: 'flash' });
 
-    // Sharp gold shards
     const n = 7 + Math.floor(Math.random() * 4);
     for (let i = 0; i < n; i++) {
       const shard = new THREE.Mesh(
         new THREE.TetrahedronGeometry(0.18 + Math.random() * 0.2, 0),
         new THREE.MeshBasicMaterial({
           color: Math.random() > 0.4 ? GOLD_HI : GOLD,
+          transparent: true,
+          opacity: 1,
         })
       );
       shard.position.copy(origin);
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 18,
-        (Math.random() - 0.5) * 18,
-        (Math.random() - 0.5) * 10
-      );
       this.scene.add(shard);
       this.fx.push({
         mesh: shard,
         life: 0.45 + Math.random() * 0.25,
         maxLife: 0.6,
-        vel,
+        vel: new THREE.Vector3(
+          (Math.random() - 0.5) * 18,
+          (Math.random() - 0.5) * 18,
+          (Math.random() - 0.5) * 10
+        ),
         spin: new THREE.Vector3(
           (Math.random() - 0.5) * 12,
           (Math.random() - 0.5) * 12,
           (Math.random() - 0.5) * 12
         ),
         kind: 'shard',
+      });
+    }
+  }
+
+  /** Wet splat + 2–3 smaller gel drops. */
+  _blastGoop(h) {
+    const origin = h.mesh.position.clone();
+
+    // Magenta sticky flash
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(1.15, 12, 10),
+      new THREE.MeshBasicMaterial({
+        color: MAGENTA,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+      })
+    );
+    flash.position.copy(origin);
+    this.scene.add(flash);
+    this.fx.push({ mesh: flash, life: 0.16, maxLife: 0.16, kind: 'flash' });
+
+    // Hot orange/yellow splash sparks (concept juice)
+    for (let i = 0; i < 14; i++) {
+      const col = [0xff8800, 0xffcc00, LIME, MAGENTA, CYAN][i % 5];
+      const drop = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1 + Math.random() * 0.14, 6, 6),
+        new THREE.MeshBasicMaterial({
+          color: col,
+          transparent: true,
+          opacity: 1,
+        })
+      );
+      drop.position.copy(origin);
+      this.scene.add(drop);
+      this.fx.push({
+        mesh: drop,
+        life: 0.3 + Math.random() * 0.3,
+        maxLife: 0.55,
+        vel: new THREE.Vector3(
+          (Math.random() - 0.5) * 16,
+          (Math.random() - 0.5) * 16,
+          (Math.random() - 0.5) * 9
+        ),
+        spin: new THREE.Vector3(0, 0, 0),
+        kind: 'shard',
+      });
+    }
+
+    // 2–3 smaller gel splits that fade
+    const splits = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < splits; i++) {
+      const gel = new THREE.Mesh(
+        new THREE.SphereGeometry(0.38, 12, 10),
+        new THREE.MeshBasicMaterial({
+          color: CYAN,
+          transparent: true,
+          opacity: 0.85,
+          depthWrite: false,
+        })
+      );
+      gel.position.copy(origin);
+      gel.scale.set(1.15, 1.35, 1.0);
+      this.scene.add(gel);
+      this.fx.push({
+        mesh: gel,
+        life: 0.55 + Math.random() * 0.25,
+        maxLife: 0.75,
+        vel: new THREE.Vector3(
+          (Math.random() - 0.5) * 7,
+          (Math.random() - 0.5) * 7,
+          (Math.random() - 0.5) * 3
+        ),
+        spin: new THREE.Vector3(0, 2, 0),
+        kind: 'gelSplit',
       });
     }
   }
@@ -303,6 +544,13 @@ export class HazardManager {
         f.mesh.rotation.y += f.spin.y * dt;
         f.mesh.material.opacity = Math.max(0, f.life / f.maxLife);
         f.mesh.material.transparent = true;
+      } else if (f.kind === 'gelSplit') {
+        f.mesh.position.addScaledVector(f.vel, dt);
+        f.vel.multiplyScalar(0.96);
+        const t = Math.max(0, f.life / f.maxLife);
+        f.mesh.material.opacity = t * 0.85;
+        f.mesh.scale.setScalar(0.7 + t * 0.5);
+        f.mesh.rotation.y += dt * 2;
       }
       if (f.life <= 0) {
         this.scene.remove(f.mesh);
