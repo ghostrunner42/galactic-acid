@@ -25,15 +25,20 @@ export class HazardManager {
     this.spawnTimer = 0.35;
     this.spawnInterval = SPAWN_INTERVAL_START;
     this.time = 0;
+    this.xrMode = false;
+  }
+
+  setXRMode(on) {
+    this.xrMode = !!on;
+    for (const hz of this.hazards) hz._goop?.setLowQuality?.(this.xrMode);
   }
 
   update(dt, playerZ, player, onScore) {
     this.time += dt;
     this.spawnTimer -= dt;
-    this.spawnInterval = Math.max(
-      SPAWN_INTERVAL_MIN,
-      SPAWN_INTERVAL_START - this.time * 0.008
-    );
+    const minI = this.xrMode ? 0.7 : SPAWN_INTERVAL_MIN;
+    const startI = this.xrMode ? 1.1 : SPAWN_INTERVAL_START;
+    this.spawnInterval = Math.max(minI, startI - this.time * (this.xrMode ? 0.004 : 0.008));
 
     if (this.spawnTimer <= 0) {
       this._spawnBurst(playerZ);
@@ -91,10 +96,12 @@ export class HazardManager {
 
   /** Busy: 2–4 lava pieces per tick */
   _spawnBurst(playerZ) {
-    const n = 1 + Math.floor(Math.random() * 2);
+    const maxLive = this.xrMode ? 5 : 10;
+    if (this.hazards.length >= maxLive) return;
+    const n = this.xrMode ? 1 : 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < n; i++) {
+      if (this.hazards.length >= maxLive) break;
       const z = playerZ - SPAWN_AHEAD - Math.random() * 40 - i * 14;
-      // More bubbles in the lane, seams on the banks
       const h = Math.random() < 0.55 ? this._makeBubble(z) : this._makeSeam(z);
       this.hazards.push(h);
       this.scene.add(h.mesh);
@@ -108,6 +115,7 @@ export class HazardManager {
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
     const goop = createGoopMetaball('seam');
+    if (this.xrMode) goop.setLowQuality?.(true);
     group.add(goop.mesh);
 
     return {
@@ -138,6 +146,7 @@ export class HazardManager {
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
     const goop = createGoopMetaball('blob');
+    if (this.xrMode) goop.setLowQuality?.(true);
     // Stretch into a lamp pill — avoid round marble look
     const stretch = 1.05 + Math.random() * 0.15;
     goop.mesh.scale.x *= 1.0 + Math.random() * 0.06;
@@ -179,7 +188,8 @@ export class HazardManager {
     this.scene.add(flash);
     this.fx.push({ mesh: flash, life: 0.16, maxLife: 0.16, kind: 'flash' });
 
-    for (let i = 0; i < 16; i++) {
+    const dropN = this.xrMode ? 4 : 16;
+    for (let i = 0; i < dropN; i++) {
       const col = [0xff8800, 0xffcc00, LIME, MAGENTA, CYAN][i % 5];
       const drop = new THREE.Mesh(
         new THREE.SphereGeometry(0.12 + Math.random() * 0.16, 6, 6),
@@ -205,7 +215,7 @@ export class HazardManager {
       });
     }
 
-    const splits = 3 + Math.floor(Math.random() * 2);
+    const splits = this.xrMode ? 1 : 3 + Math.floor(Math.random() * 2);
     for (let i = 0; i < splits; i++) {
       const gel = new THREE.Mesh(
         new THREE.SphereGeometry(0.4, 12, 10),
@@ -307,5 +317,6 @@ export class HazardManager {
     this.spawnTimer = 0.35;
     this.spawnInterval = SPAWN_INTERVAL_START;
     this.time = 0;
+    // keep xrMode across restarts while headset session is live
   }
 }

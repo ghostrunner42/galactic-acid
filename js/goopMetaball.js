@@ -27,6 +27,7 @@ uniform float uSubtract;
 uniform float uIsol;
 uniform vec3 uBoundCenter;
 uniform float uBoundRadius;
+uniform float uLowQuality; // 1 = Quest XR cheap path
 
 varying vec3 vWorldPos;
 
@@ -73,14 +74,16 @@ float wrinkle(vec3 p) {
 float mapScene(vec3 p) {
   float f = fieldScene(p);
   float g = length(fieldGrad(p));
-  return (uIsol - f) / max(g, 0.08) + wrinkle(p);
+  float d = (uIsol - f) / max(g, 0.08);
+  if (uLowQuality < 0.5) d += wrinkle(p);
+  return d;
 }
 
 vec3 calcNormal(vec3 p) {
   vec3 g = fieldGrad(p);
   float gl = length(g);
   if (gl > 1e-5) {
-    // Wrinkle gradient via central differences (cheap)
+    if (uLowQuality > 0.5) return normalize(-g);
     const float e = 0.04;
     vec3 wn = vec3(
       wrinkle(p + vec3(e, 0.0, 0.0)) - wrinkle(p - vec3(e, 0.0, 0.0)),
@@ -148,12 +151,15 @@ void main() {
 
   float t = tEnter;
   float hit = -1.0;
-  for (int i = 0; i < 96; i++) {
+  // Desktop ~64 steps; Quest XR ~24 (stereo already 2× cost)
+  int maxSteps = uLowQuality > 0.5 ? 24 : 64;
+  for (int i = 0; i < 64; i++) {
+    if (i >= maxSteps) break;
     vec3 p = ro + rd * t;
     if (length(p - uBoundCenter) > uBoundRadius + 0.35) break;
     float d = mapScene(p);
-    if (d < 0.02) { hit = t; break; }
-    t += clamp(d * 0.8, 0.01, 0.22);
+    if (d < (uLowQuality > 0.5 ? 0.04 : 0.02)) { hit = t; break; }
+    t += clamp(d * (uLowQuality > 0.5 ? 1.0 : 0.8), uLowQuality > 0.5 ? 0.03 : 0.01, uLowQuality > 0.5 ? 0.35 : 0.22);
     if (t > tEnter + uBoundRadius * 2.8) break;
   }
 
@@ -166,33 +172,39 @@ void main() {
   float ndv = max(dot(n, view), 0.0);
   float fres = pow(1.0 - ndv, 1.55);
 
-  // Thickness / density toward core
-  float thick = 0.0;
-  vec3 pi = p - view * 0.28;
-  for (int j = 0; j < 5; j++) {
-    float di = mapScene(pi);
-    thick += exp(-max(di, 0.0) * 3.6);
-    pi -= view * 0.18;
+  float thick = fres; // default: fresnel as stand-in
+  if (uLowQuality < 0.5) {
+    thick = 0.0;
+    vec3 pi = p - view * 0.28;
+    for (int j = 0; j < 5; j++) {
+      float di = mapScene(pi);
+      thick += exp(-max(di, 0.0) * 3.6);
+      pi -= view * 0.18;
+    }
+    thick = clamp(thick * 0.22, 0.0, 1.0);
+  } else {
+    thick = clamp(1.0 - fres, 0.0, 1.0);
   }
-  thick = clamp(thick * 0.22, 0.0, 1.0);
 
-  // Field depth above isol — denser = deeper into wax
   float fHit = fieldScene(p);
   float depth = clamp((fHit - uIsol) / 10.0, 0.0, 1.0);
 
-  // Contour coordinate: edge magenta → core lime (matches tunnel cells)
   float band = clamp(fres * 0.78 + (1.0 - thick) * 0.45 - depth * 0.25, 0.0, 1.0);
-  float grain = hash21(gl_FragCoord.xy * 0.7 + floor(uTime * 8.0));
+  float grain = uLowQuality > 0.5
+    ? hash21(gl_FragCoord.xy * 0.35)
+    : hash21(gl_FragCoord.xy * 0.7 + floor(uTime * 8.0));
   vec3 col = rimContour(band, grain);
 
-  // Mild wet highlight (keep gel, not chrome)
-  vec3 halfV = normalize(view + normalize(vec3(0.15, 0.75, 0.35)));
-  float spec = pow(max(dot(n, halfV), 0.0), 36.0);
-  col += vec3(1.0, 0.9, 1.0) * spec * 0.35;
+  if (uLowQuality < 0.5) {
+    vec3 halfV = normalize(view + normalize(vec3(0.15, 0.75, 0.35)));
+    float spec = pow(max(dot(n, halfV), 0.0), 36.0);
+    col += vec3(1.0, 0.9, 1.0) * spec * 0.35;
+  }
 
-  // More opaque than soft jelly — closer to solid rim wax cells
-  float alpha = mix(0.72, 0.97, fres * 0.55 + (1.0 - thick) * 0.25);
-  alpha = clamp(alpha, 0.65, 0.98);
+  // XR: more opaque → less transparent overdraw
+  float alpha = uLowQuality > 0.5
+    ? mix(0.88, 0.98, fres)
+    : clamp(mix(0.72, 0.97, fres * 0.55 + (1.0 - thick) * 0.25), 0.65, 0.98);
   gl_FragColor = vec4(col, alpha);
 }
 `;
@@ -285,6 +297,7 @@ export function createGoopMetaball(mode = 'seam') {
     uIsol: { value: ISOL },
     uBoundCenter: { value: new THREE.Vector3() },
     uBoundRadius: { value: 5.5 },
+    uLowQuality: { value: 0 },
   };
 
   const mat = new THREE.ShaderMaterial({
@@ -297,7 +310,7 @@ export function createGoopMetaball(mode = 'seam') {
   });
 
   const boundR = mode === 'seam' ? 6.2 : 4.8;
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(boundR, 28, 20), mat);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(boundR, 16, 12), mat);
   if (mode === 'seam') {
     mesh.scale.set(1.05, 1.05, 1.35);
   } else {
@@ -373,10 +386,18 @@ export function createGoopMetaball(mode = 'seam') {
     }
   }
 
+  function setLowQuality(on) {
+    uniforms.uLowQuality.value = on ? 1 : 0;
+    // Opaque-ish path cuts transparent overdraw cost in stereo
+    mat.depthWrite = !!on;
+    mat.transparent = true;
+  }
+
   return {
     mesh,
     update,
     pinch,
+    setLowQuality,
     dispose() {
       mesh.geometry.dispose();
       mat.dispose();

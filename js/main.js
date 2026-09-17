@@ -23,7 +23,7 @@ camera.position.set(0, 0, 6);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
 document.body.appendChild(renderer.domElement);
@@ -162,7 +162,18 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+function applyXRPerf(on) {
+  // Stereo + raymarch is the cliff — drop res & pixel ratio in headset
+  renderer.setPixelRatio(on ? 1 : Math.min(window.devicePixelRatio, 2));
+  if (renderer.xr.setFramebufferScaleFactor) {
+    renderer.xr.setFramebufferScaleFactor(on ? 0.65 : 1);
+  }
+  hazards.setXRMode?.(on);
+  stars.visible = !on;
+}
+
 renderer.xr.addEventListener('sessionstart', () => {
+  applyXRPerf(true);
   scoreMesh.visible = true;
   // Hide flat overlays — unreadable in headset
   title.classList.add('hidden');
@@ -170,6 +181,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   paintScorePlate();
 });
 renderer.xr.addEventListener('sessionend', () => {
+  applyXRPerf(false);
   scoreMesh.visible = false;
   camera.position.set(0, 0, 0);
   camera.rotation.set(0, 0, 0);

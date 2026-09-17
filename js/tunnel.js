@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
 const SEGMENT_LENGTH = 40;
-const SEGMENT_COUNT = 14;
+const SEGMENT_COUNT = 10;
 const TUBE_RADIUS = 8;
-const RADIAL_SEGMENTS = 64;
+const RADIAL_SEGMENTS = 32;
 const MORPH_RATIO = 0.25;
 
 export const RIM_PALETTE = [0xff2bd6, 0x00e5ff, 0xc8ff00, 0x8b00ff];
