@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { TUBE_RADIUS } from './tunnel.js';
+import { createGoopMetaball } from './goopMetaball.js';
 
 /**
  * Hazard identity (locked Hippie Bot):
  * 1. goldAsteroid — warm metallic shootable; blast = sharp gold shards + white flash
  * 2. jellyAlien — soft cyan→violet biolum; DODGE ONLY (shots no-op)
- * 3. gelGoop — soft neon lava jelly shootable (magenta outline, cyan/lime guts); wet splat + split
+ * 3. gelGoop — raymarched SDF metaball shootable (magenta fresnel, cyan→lime guts); wet splat + pinch
  */
 
 const SPAWN_AHEAD = 90;
@@ -75,7 +76,7 @@ export class HazardManager {
             L.mesh.geometry.dispose();
             L.mesh.material.dispose();
             player.lasers.splice(li, 1);
-            if (h.kind === 'goop') this._blastGoop(h);
+            if (h.kind === 'goop') { h._goop?.pinch?.(); this._blastGoop(h); }
             else this._blastAsteroid(h);
             this._destroyHazard(i, onScore, h.kind === 'goop' ? 20 : 25);
             destroyed = true;
@@ -175,144 +176,23 @@ export class HazardManager {
   _makeGelGoop(z) {
     const group = new THREE.Group();
     const ang = Math.random() * Math.PI * 2;
-    const rad = Math.random() * (TUBE_RADIUS - 3.4);
+    const rad = Math.random() * (TUBE_RADIUS - 3.6);
     group.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, z);
 
-    // Soft teardrop / peanut — concept-art jelly volume
-    const peanut = Math.random() < 0.4;
-    const sx = peanut ? 1.45 : 0.95 + Math.random() * 0.15;
-    const sy = peanut ? 0.9 : 1.35 + Math.random() * 0.2;
-    const sz = peanut ? 0.95 : 0.95;
-
-    const gelMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: {
-        uRim: { value: new THREE.Color(MAGENTA) },
-        uCore: { value: new THREE.Color(CYAN) },
-        uHot: { value: new THREE.Color(LIME) },
-        uTime: { value: 0 },
-        uPhase: { value: Math.random() * 6.28 },
-      },
-      vertexShader: `
-        varying vec3 vN;
-        varying vec3 vV;
-        void main() {
-          vec4 w = modelViewMatrix * vec4(position, 1.0);
-          vN = normalize(normalMatrix * normal);
-          vV = normalize(-w.xyz);
-          gl_Position = projectionMatrix * w;
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 uRim;
-        uniform vec3 uCore;
-        uniform vec3 uHot;
-        uniform float uTime;
-        uniform float uPhase;
-        varying vec3 vN;
-        varying vec3 vV;
-        void main() {
-          float fres = pow(1.0 - max(dot(vN, vV), 0.0), 2.4);
-          float pulse = 0.5 + 0.5 * sin(uTime * 2.2 + uPhase);
-          vec3 guts = mix(uCore, uHot, pulse * 0.65);
-          vec3 col = mix(guts, uRim, fres);
-          float alpha = mix(0.45, 0.95, fres);
-          // soft core glow
-          alpha = max(alpha, 0.55);
-          gl_FragColor = vec4(col, alpha);
-        }
-      `,
-    });
-
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.82, 24, 18), gelMat);
-    body.scale.set(sx, sy, sz);
-    group.add(body);
-
-    // Magenta rim shell (BackSide) — thick neon outline read
-    const rim = new THREE.Mesh(
-      new THREE.SphereGeometry(0.88, 20, 16),
-      new THREE.MeshBasicMaterial({
-        color: MAGENTA,
-        transparent: true,
-        opacity: 0.35,
-        side: THREE.BackSide,
-        depthWrite: false,
-      })
-    );
-    rim.scale.copy(body.scale);
-    group.add(rim);
-
-    // Lime nucleus
-    const nucleus = new THREE.Mesh(
-      new THREE.SphereGeometry(0.28, 12, 10),
-      new THREE.MeshBasicMaterial({
-        color: LIME,
-        transparent: true,
-        opacity: 0.9,
-      })
-    );
-    group.add(nucleus);
-
-    // Cyan bubble cluster
-    const bubbles = [];
-    for (let i = 0; i < 5; i++) {
-      const b = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06 + Math.random() * 0.08, 6, 6),
-        new THREE.MeshBasicMaterial({
-          color: CYAN,
-          transparent: true,
-          opacity: 0.75,
-        })
-      );
-      b.position.set(
-        (Math.random() - 0.5) * 0.55,
-        (Math.random() - 0.5) * 0.7,
-        (Math.random() - 0.5) * 0.45
-      );
-      group.add(b);
-      bubbles.push(b);
-    }
-
-    // Gloss specular dots (wet look)
-    for (let i = 0; i < 3; i++) {
-      const speck = new THREE.Mesh(
-        new THREE.SphereGeometry(0.04, 6, 6),
-        new THREE.MeshBasicMaterial({ color: 0xffffff })
-      );
-      speck.position.set(
-        0.25 + Math.random() * 0.25,
-        0.2 + Math.random() * 0.35,
-        0.35
-      );
-      group.add(speck);
-    }
-
-    const phase = Math.random() * Math.PI * 2;
-    const base = body.scale.clone();
+    const goop = createGoopMetaball();
+    group.add(goop.mesh);
 
     return {
       mesh: group,
       shootable: true,
-      hitRadius: 1.1,
+      hitRadius: 1.35,
       kind: 'goop',
+      _goop: goop,
       update(dt, time) {
-        gelMat.uniforms.uTime.value = time;
-        const w = Math.sin(time * 1.5 + phase);
-        group.position.y += Math.sin(time * 1.05 + phase) * dt * 0.4;
-        group.position.x += Math.cos(time * 0.85 + phase) * dt * 0.22;
-        // squashy undulate — gel floats, rocks tumble
-        const squash = 1 + w * 0.14;
-        const stretch = 1 - w * 0.1;
-        body.scale.set(base.x * squash, base.y * stretch, base.z * squash);
-        rim.scale.copy(body.scale);
-        nucleus.material.opacity = 0.7 + Math.sin(time * 3.2 + phase) * 0.25;
-        for (const b of bubbles) {
-          b.position.y += Math.sin(time * 2 + b.position.x) * dt * 0.15;
-        }
+        goop.update(dt, time);
       },
       collides(pPos, pR) {
-        return group.position.distanceTo(pPos) < 1.1 + pR;
+        return group.position.distanceTo(pPos) < 1.35 + pR;
       },
     };
   }
@@ -563,6 +443,7 @@ export class HazardManager {
   _destroyHazard(index, onScore, points) {
     const h = this.hazards[index];
     if (!h) return;
+    h._goop?.dispose?.();
     this.scene.remove(h.mesh);
     this._disposeMesh(h.mesh);
     this.hazards.splice(index, 1);

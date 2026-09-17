@@ -60,3 +60,6 @@ Continuous cylinder + UV scroll; tile remix ~¼ scroll feel.
 ## Ship credit
 Player craft: **[ricks ufo](https://poly.pizza/m/q6vNUoHZXr)** by [eeee](https://poly.pizza) — **CC-BY** (attribution required).
 
+
+
+Goop hazard: GPU raymarched SDF metaballs (`js/goopMetaball.js`).
