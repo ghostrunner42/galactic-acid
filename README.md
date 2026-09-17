@@ -56,3 +56,6 @@ Continuous cylinder + UV scroll; tile remix ~¼ scroll feel.
 ## Tunnel rim (locked)
 - `assets/tunnel/rim-locked.png` — user-locked lava-blob pixel map (primary skin)
 - Continuous cylinder + UV scroll; nearest-neighbor filter
+
+## Ship credit
+Player craft: **Quaternius Spitfire** from [Ultimate Spaceships Pack](https://quaternius.com/packs/ultimatespaceships.html) (CC0). Same author as the Poly Pizza listing (CF blocked direct download).
