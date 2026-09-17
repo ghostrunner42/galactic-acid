@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Galactic Acid — Wormhole Runner</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="hud">
+    <div id="score">SCORE: 0</div>
+    <div id="hint">WASD / Arrows move · Space / Click fire · Survive the wormhole</div>
+  </div>
+  <div id="overlay" class="hidden">
+    <div id="overlay-inner">
+      <h1>GALACTIC ACID</h1>
+      <p id="final-score">Score: 0</p>
+      <p class="prompt">Space or Click to restart</p>
+    </div>
+  </div>
+  <div id="title" class="title-screen">
+    <h1>GALACTIC ACID</h1>
+    <p>Endless wormhole · dodge · shoot</p>
+    <p class="prompt">Space or Click to launch</p>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
